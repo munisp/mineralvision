@@ -173,21 +173,46 @@ class WALDOJEPAIntegration:
         logger.info(f"Initialized WALDOJEPAIntegration with mode={integration_mode.value}")
     
     def load_waldo_model(self) -> None:
-        """Load WALDO detection model."""
-        if self.waldo_model_path:
-            logger.info(f"Loading WALDO model from {self.waldo_model_path}")
-            self._waldo_model = {
-                "type": "rf_detr",
-                "path": self.waldo_model_path,
-                "loaded": True,
-            }
-        else:
-            logger.info("Using default WALDO model configuration")
-            self._waldo_model = {
-                "type": "rf_detr",
-                "path": None,
-                "loaded": True,
-            }
+        """
+        Load the canonical WALDO RF-DETR detector.
+
+        Imports detector primitives from the canonical
+        MineralVision_WALDO_Production_Package via the WALDO_PACKAGE_SRC
+        env var (or a relative-path fallback). When the heavy ML stack is
+        unavailable, the detector stays None and detection returns no
+        results — never fake detections.
+        """
+        if self._waldo_model is not None:
+            return
+
+        try:
+            import sys
+            import os as _os
+            _waldo_src = _os.getenv(
+                "WALDO_PACKAGE_SRC",
+                _os.path.normpath(_os.path.join(
+                    _os.path.dirname(__file__), "..", "..", "..", "..",
+                    "MineralVision_WALDO_Production_Package", "src")),
+            )
+            if _waldo_src not in sys.path:
+                sys.path.insert(0, _waldo_src)
+            from waldo_integration.rfdetr_backbone import (
+                RFDETRDetector, RFDETRConfig, RFDETRVariant,
+            )
+
+            config = RFDETRConfig(
+                variant=RFDETRVariant.MEDIUM,
+                confidence_threshold=0.5,
+                checkpoint_path=self.waldo_model_path,
+            )
+            self._waldo_model = RFDETRDetector(config)
+            logger.info("Canonical WALDO RF-DETR detector loaded")
+        except Exception as e:
+            logger.warning(
+                f"Canonical WALDO detector unavailable ({e}); "
+                "detection will return no results (no fake detections)"
+            )
+            self._waldo_model = None
     
     def register_target_examples(
         self,
@@ -274,38 +299,32 @@ class WALDOJEPAIntegration:
         image: Any,
         confidence_threshold: float
     ) -> List[DetectionResult]:
-        """Run WALDO detection model."""
+        """
+        Run the canonical WALDO detector on an image.
+
+        Returns an empty list when the detector is unavailable — never
+        fabricates detections.
+        """
         import numpy as np
-        import hashlib
-        
-        if isinstance(image, np.ndarray):
-            h, w = image.shape[:2]
-        else:
-            h, w = 224, 224
-        
-        num_detections = np.random.randint(0, 5)
+
+        if self._waldo_model is None:
+            return []
+
+        canonical_detections = self._waldo_model.detect(np.asarray(image))
+
         detections = []
-        
-        for i in range(num_detections):
-            x1 = np.random.randint(0, w - 50)
-            y1 = np.random.randint(0, h - 50)
-            x2 = x1 + np.random.randint(30, min(100, w - x1))
-            y2 = y1 + np.random.randint(30, min(100, h - y1))
-            
-            confidence = np.random.uniform(confidence_threshold, 1.0)
-            
-            class_names = ["equipment", "vehicle", "structure", "stockpile"]
-            class_name = np.random.choice(class_names)
-            
-            detection_id = hashlib.md5(f"{i}_{x1}_{y1}".encode()).hexdigest()[:12]
-            
+        for det in canonical_detections:
+            if det.confidence < confidence_threshold:
+                continue
+            x1, y1, x2, y2 = det.bbox
             detections.append(DetectionResult(
-                detection_id=detection_id,
-                class_name=class_name,
-                confidence=float(confidence),
+                detection_id=det.detection_id,
+                class_name=det.class_name,
+                confidence=float(det.confidence),
                 bbox=(float(x1), float(y1), float(x2), float(y2)),
+                attributes={"source": "waldo_rfdetr_canonical", **(det.metadata or {})},
             ))
-        
+
         return detections
     
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:

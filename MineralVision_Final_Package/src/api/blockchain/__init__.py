@@ -9,7 +9,19 @@ This module provides comprehensive blockchain capabilities including:
 - Layer-2 integration for scalability (Optimism, Arbitrum, Polygon)
 """
 
-from .blockchain_data_provenance import BlockchainDataProvenance
+# BlockchainDataProvenance requires optional web3/ipfs backends; keep the
+# package importable without them (endpoints degrade with HTTP 503).
+try:
+    from .blockchain_data_provenance import BlockchainDataProvenance
+except ImportError:  # pragma: no cover - depends on optional deps
+    BlockchainDataProvenance = None
+
+from .local_ledger import (
+    LedgerSigner,
+    LocalCryptoLedger,
+    Block,
+    merkle_root,
+)
 from .advanced_blockchain import (
     TransactionStatus,
     EventType,
@@ -30,6 +42,10 @@ from .advanced_blockchain import (
 
 __all__ = [
     'BlockchainDataProvenance',
+    'LedgerSigner',
+    'LocalCryptoLedger',
+    'Block',
+    'merkle_root',
     'TransactionStatus',
     'EventType',
     'Transaction',
