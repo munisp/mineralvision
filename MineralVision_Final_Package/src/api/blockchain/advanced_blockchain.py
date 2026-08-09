@@ -23,6 +23,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+from .local_ledger import LocalCryptoLedger
+
 
 class TransactionStatus(Enum):
     """Transaction status."""
@@ -1094,6 +1096,9 @@ class AdvancedBlockchainManager:
         )
         self.l2_bridge = Layer2Bridge()
         
+        # Real local cryptographic ledger (ed25519 / hmac-sha256 signed)
+        self.ledger = LocalCryptoLedger()
+
         # Transaction history
         self.transactions: List[Transaction] = []
         self._lock = threading.Lock()
@@ -1134,38 +1139,72 @@ class AdvancedBlockchainManager:
         if use_multisig:
             # Create multi-sig proposal
             proposal = self.multisig_manager.propose(
-                proposer=self.multisig_manager.signers.pop() if self.multisig_manager.signers else 'default',
+                proposer=next(iter(self.multisig_manager.signers)) if self.multisig_manager.signers else 'default',
                 action='register_data',
                 params=params
             )
             return {'proposal': proposal.to_dict()}
             
-        # Direct registration
+        # Direct registration — anchor in the real signed ledger
         gas_estimate = self.gas_optimizer.estimate_gas('register_data', params)
         gas_price = self.gas_optimizer.get_optimal_gas_price('normal')
-        
+
+        ledger_tx = {
+            'action': 'register_data',
+            **params,
+        }
+        block = self.ledger.add_block([ledger_tx])
+
         tx = Transaction(
-            tx_hash=f"0x{hashlib.sha256(json.dumps(params).encode()).hexdigest()}",
-            from_address='0x' + '0' * 40,
-            to_address='0x' + '1' * 40,
+            tx_hash=self.ledger.transaction_hash(ledger_tx),
+            from_address=self.ledger.signer.address,
+            to_address=self.ledger.CONTRACT_ADDRESS,
             value=0,
             gas_used=gas_estimate,
             gas_price=gas_price,
             status=TransactionStatus.CONFIRMED,
-            block_number=12345678,
+            block_number=block.index,
             data=params
         )
-        
+
         with self._lock:
             self.transactions.append(tx)
-            
+
         # Emit event
         self.event_subscriber.emit_event(
             EventType.DATA_REGISTERED,
             {'data_hash': data_hash, 'ipfs_hash': ipfs_hash}
         )
-        
-        return {'transaction': tx.to_dict()}
+
+        return {
+            'transaction': tx.to_dict(),
+            'ledger': {
+                'block_index': block.index,
+                'block_hash': block.hash,
+                'merkle_root': block.merkle_root,
+                'signature': block.signature,
+                'scheme': self.ledger.scheme,
+            }
+        }
+
+    def verify_ledger(self) -> Dict[str, Any]:
+        """Verify the full provenance chain (links, Merkle roots, signatures)."""
+        return self.ledger.verify_chain()
+
+    def get_ledger(self) -> Dict[str, Any]:
+        """Export the full ledger."""
+        return self.ledger.to_dict()
+
+    def record_multisig_execution(self, proposal: MultisigProposal) -> Dict[str, Any]:
+        """Anchor an executed multi-sig proposal in the ledger."""
+        block = self.ledger.add_block([{
+            'action': 'multisig_executed',
+            'proposal_id': proposal.proposal_id,
+            'proposer': proposal.proposer,
+            'params': proposal.params,
+            'signatures': proposal.signatures,
+        }])
+        return {'block_index': block.index, 'block_hash': block.hash}
         
     def get_contract_source(self) -> str:
         """Get the Solidity smart contract source code."""
