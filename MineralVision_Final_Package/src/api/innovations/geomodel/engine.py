@@ -32,8 +32,9 @@ def plane_normal(dip_deg: float, azimuth_deg: float) -> np.ndarray:
     direction azimuth (deg clockwise from north=+y)."""
     d = math.radians(dip_deg)
     a = math.radians(azimuth_deg)
-    n = np.array([-math.sin(d) * math.sin(a),
-                  -math.sin(d) * math.cos(a),
+    # up-normal = strike x dip-vector: tilts away from the dip direction.
+    n = np.array([math.sin(d) * math.sin(a),
+                  math.sin(d) * math.cos(a),
                   math.cos(d)])
     return n / np.linalg.norm(n)
 
