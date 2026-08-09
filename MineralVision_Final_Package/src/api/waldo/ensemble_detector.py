@@ -496,11 +496,27 @@ class EnsembleWALDODetector:
     
     def _initialize_detectors(self) -> None:
         """Initialize both detectors."""
-        # Initialize YOLO11
+        # Initialize YOLO11 via the canonical WALDO detector primitives
         try:
-            from ultralytics import YOLO
-            self.yolo_detector = YOLO(self.config.yolo_model)
-            logger.info(f"YOLO11 loaded: {self.config.yolo_model}")
+            import sys
+            import os as _os
+            _waldo_src = _os.getenv(
+                "WALDO_PACKAGE_SRC",
+                _os.path.normpath(_os.path.join(
+                    _os.path.dirname(__file__), "..", "..", "..", "..",
+                    "MineralVision_WALDO_Production_Package", "src")),
+            )
+            if _waldo_src not in sys.path:
+                sys.path.insert(0, _waldo_src)
+            from waldo_integration.detection import WALDODetector
+
+            self.yolo_detector = WALDODetector({
+                'model_path': self.config.yolo_model,
+                'architecture': 'yolo11',
+                'confidence_threshold': self.config.yolo_confidence,
+                'device': self.device,
+            }).model  # underlying ultralytics model (ensemble calls it directly)
+            logger.info(f"YOLO11 loaded (canonical WALDODetector): {self.config.yolo_model}")
         except Exception as e:
             logger.warning(f"Failed to load YOLO11: {e}")
             self.yolo_detector = None

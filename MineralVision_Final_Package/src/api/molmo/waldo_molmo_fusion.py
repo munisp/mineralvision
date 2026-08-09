@@ -202,26 +202,42 @@ class WALDOMolmoFusion:
         }
     
     def _load_waldo_model(self):
-        """Load WALDO detection model."""
+        """
+        Load the canonical WALDO detector.
+
+        Imports detector primitives from the canonical
+        MineralVision_WALDO_Production_Package via the WALDO_PACKAGE_SRC
+        env var (or a relative-path fallback). When unavailable, runs in
+        Molmo-only mode — never fabricates detections.
+        """
         if self._waldo_model is not None:
             return
-        
+
         try:
-            # Try to import WALDO/YOLO
-            from ultralytics import YOLO
-            
-            model_path = self.waldo_model_path or os.environ.get(
-                "WALDO_MODEL_PATH", "yolo11m.pt"
+            import sys
+            import os as _os
+            _waldo_src = _os.getenv(
+                "WALDO_PACKAGE_SRC",
+                _os.path.normpath(_os.path.join(
+                    _os.path.dirname(__file__), "..", "..", "..", "..",
+                    "MineralVision_WALDO_Production_Package", "src")),
             )
-            
-            self._waldo_model = YOLO(model_path)
-            logger.info(f"WALDO model loaded: {model_path}")
-            
-        except ImportError:
-            logger.warning("YOLO not available, using Molmo-only mode")
-            self._waldo_model = None
+            if _waldo_src not in sys.path:
+                sys.path.insert(0, _waldo_src)
+            from waldo_integration.detection import WALDODetector
+
+            model_path = self.waldo_model_path or os.environ.get(
+                "WALDO_MODEL_PATH"
+            )
+            self._waldo_model = WALDODetector({
+                'model_path': model_path,
+                'architecture': 'yolo11',
+                'confidence_threshold': self.confidence_threshold,
+                'device': 'cpu',
+            })
+            logger.info(f"Canonical WALDO detector loaded: {self._waldo_model.model_path}")
         except Exception as e:
-            logger.warning(f"Failed to load WALDO model: {e}")
+            logger.warning(f"Canonical WALDO detector unavailable ({e}), using Molmo-only mode")
             self._waldo_model = None
     
     def _run_waldo_detection(
@@ -229,33 +245,32 @@ class WALDOMolmoFusion:
         frame,
         frame_index: int,
     ) -> List[WALDODetection]:
-        """Run WALDO detection on a frame."""
+        """Run canonical WALDO detection on a frame."""
         if self._waldo_model is None:
             return []
-        
-        results = self._waldo_model(frame, verbose=False)
+
+        import numpy as np
+        raw = self._waldo_model.detect(
+            np.asarray(frame), metadata={'frame_id': frame_index}
+        )
         detections = []
-        
-        for result in results:
-            boxes = result.boxes
-            for i, box in enumerate(boxes):
-                x1, y1, x2, y2 = box.xyxy[0].tolist()
-                conf = float(box.conf[0])
-                cls = int(box.cls[0])
-                class_name = result.names[cls]
-                
-                if conf >= self.confidence_threshold:
-                    detections.append(WALDODetection(
-                        bbox=BoundingBox(
-                            x1=x1, y1=y1, x2=x2, y2=y2,
-                            confidence=conf, label=class_name
-                        ),
-                        class_name=class_name,
-                        confidence=conf,
-                        source=DetectionSource.WALDO_YOLO,
-                        frame_index=frame_index,
-                    ))
-        
+
+        for det in raw:
+            conf = float(det['confidence'])
+            if conf >= self.confidence_threshold:
+                x1, y1, x2, y2 = det['bbox']
+                class_name = det['class_name']
+                detections.append(WALDODetection(
+                    bbox=BoundingBox(
+                        x1=x1, y1=y1, x2=x2, y2=y2,
+                        confidence=conf, label=class_name
+                    ),
+                    class_name=class_name,
+                    confidence=conf,
+                    source=DetectionSource.WALDO_YOLO,
+                    frame_index=frame_index,
+                ))
+
         return detections
     
     def _get_molmo_understanding(
