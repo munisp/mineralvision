@@ -1,0 +1,54 @@
+{
+  "category": "water",
+  "title": "Water & Discharge Management",
+  "rules": [
+    {
+      "id": "WAT-001",
+      "description": "A valid water abstraction/discharge licence must be held",
+      "check": {"field": "water.discharge_permit", "op": "present"},
+      "severity": "critical",
+      "remediation": "Obtain a discharge licence from the water regulator before any dewatering or discharge; document licence number and expiry.",
+      "framework_ref": "IFC PS3 / GRI 303-4"
+    },
+    {
+      "id": "WAT-002",
+      "description": "Water discharge monitoring data must be recorded",
+      "check": {"field": "water.monitoring_data_recorded", "op": "is_true"},
+      "severity": "major",
+      "remediation": "Implement a discharge monitoring program with calibrated flow and quality measurements at all discharge points.",
+      "framework_ref": "GRI 303-2"
+    },
+    {
+      "id": "WAT-003",
+      "description": "Total suspended solids in discharge must remain below 50 mg/L",
+      "check": {"field": "water.tss_mg_l", "op": "lte", "value": 50},
+      "severity": "major",
+      "remediation": "Install or upgrade sediment control (settling ponds, coagulation) and re-sample discharge until TSS is within limits.",
+      "framework_ref": "IFC EHS Guidelines 1.1"
+    },
+    {
+      "id": "WAT-004",
+      "description": "Discharge pH must be within the 6.0–9.0 range",
+      "check": {"field": "water.discharge_ph", "op": "between", "value": [6.0, 9.0]},
+      "severity": "critical",
+      "remediation": "Neutralise acidic or alkaline effluent (lime dosing / acid-rock-drainage treatment) before discharge; investigate ARD sources.",
+      "framework_ref": "IFC EHS Guidelines 1.1 / GRI 303-4"
+    },
+    {
+      "id": "WAT-005",
+      "description": "A groundwater baseline study must predate operations",
+      "check": {"field": "water.groundwater_baseline_study", "op": "present"},
+      "severity": "major",
+      "remediation": "Commission a hydrogeological baseline study with at least 12 months of monitoring bore data.",
+      "framework_ref": "GRI 303-1"
+    },
+    {
+      "id": "WAT-006",
+      "description": "Annual water consumption intensity must be reported",
+      "check": {"field": "water.annual_consumption_m3", "op": "present"},
+      "severity": "minor",
+      "remediation": "Meter and report total annual water withdrawal and consumption per tonne of ore processed.",
+      "framework_ref": "GRI 303-5"
+    }
+  ]
+}

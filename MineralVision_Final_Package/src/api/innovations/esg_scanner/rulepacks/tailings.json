@@ -1,0 +1,54 @@
+{
+  "category": "tailings",
+  "title": "Tailings Storage Facility Governance",
+  "rules": [
+    {
+      "id": "TAF-001",
+      "description": "A TSF design report by a qualified engineer must exist",
+      "check": {"field": "tailings.design_report", "op": "present"},
+      "severity": "critical",
+      "remediation": "Commission a TSF design report signed by a suitably qualified engineer covering stability, hydrology and closure.",
+      "framework_ref": "GISTM 4.1"
+    },
+    {
+      "id": "TAF-002",
+      "description": "An Engineer of Record must be appointed for each TSF",
+      "check": {"field": "tailings.engineer_of_record", "op": "present"},
+      "severity": "critical",
+      "remediation": "Formally appoint an Engineer of Record with documented responsibilities and site-visit cadence.",
+      "framework_ref": "GISTM 5.3"
+    },
+    {
+      "id": "TAF-003",
+      "description": "An independent tailings review must be completed within the last 3 years",
+      "check": {"field": "tailings.last_independent_review_years", "op": "lte", "value": 3},
+      "severity": "major",
+      "remediation": "Schedule an Independent Tailings Review Board assessment and close out its recommendations.",
+      "framework_ref": "GISTM 10.5"
+    },
+    {
+      "id": "TAF-004",
+      "description": "A dam breach / emergency preparedness plan must be in place",
+      "check": {"field": "tailings.emergency_preparedness_plan", "op": "present"},
+      "severity": "critical",
+      "remediation": "Develop and drill an Emergency Preparedness and Response Plan with downstream notification procedures.",
+      "framework_ref": "GISTM 13.1 / IFC PS1"
+    },
+    {
+      "id": "TAF-005",
+      "description": "TSF freeboard must remain at or above the design minimum (m)",
+      "check": {"field": "tailings.freeboard_above_minimum", "op": "is_true"},
+      "severity": "critical",
+      "remediation": "Immediately reduce pond volume or raise the embankment; verify freeboard survey against design criteria.",
+      "framework_ref": "GISTM 6.4"
+    },
+    {
+      "id": "TAF-006",
+      "description": "TSF instrumentation data must be reviewed at least quarterly",
+      "check": {"field": "tailings.instrumentation_review_quarterly", "op": "is_true"},
+      "severity": "major",
+      "remediation": "Implement quarterly review of piezometer and deformation monitoring with trigger-action-response plans.",
+      "framework_ref": "GISTM 7.4"
+    }
+  ]
+}

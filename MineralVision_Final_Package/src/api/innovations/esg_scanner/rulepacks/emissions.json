@@ -1,0 +1,54 @@
+{
+  "category": "emissions",
+  "title": "Air Emissions & Greenhouse Gas",
+  "rules": [
+    {
+      "id": "EMI-001",
+      "description": "Scope 1 greenhouse gas emissions must be inventoried",
+      "check": {"field": "emissions.scope1_tco2e", "op": "present"},
+      "severity": "major",
+      "remediation": "Build a Scope 1 GHG inventory (diesel, explosives, on-site generation) following the GHG Protocol.",
+      "framework_ref": "GRI 305-1 / GHG Protocol"
+    },
+    {
+      "id": "EMI-002",
+      "description": "Scope 2 greenhouse gas emissions must be inventoried",
+      "check": {"field": "emissions.scope2_tco2e", "op": "present"},
+      "severity": "minor",
+      "remediation": "Quantify purchased-electricity emissions using market- or location-based factors.",
+      "framework_ref": "GRI 305-2"
+    },
+    {
+      "id": "EMI-003",
+      "description": "Dust (PM10) at site boundary must not exceed 50 µg/m³ (24h avg)",
+      "check": {"field": "emissions.pm10_ug_m3", "op": "lte", "value": 50},
+      "severity": "major",
+      "remediation": "Apply dust suppression (water carts, surface stabilisation) on haul roads and re-monitor boundary PM10.",
+      "framework_ref": "IFC EHS Guidelines 1.1"
+    },
+    {
+      "id": "EMI-004",
+      "description": "An emissions reduction target must be formally adopted",
+      "check": {"field": "emissions.reduction_target_adopted", "op": "is_true"},
+      "severity": "minor",
+      "remediation": "Adopt a board-approved emissions reduction target with baseline year and interim milestones.",
+      "framework_ref": "GRI 305-5"
+    },
+    {
+      "id": "EMI-005",
+      "description": "NOx emissions from mobile fleet must be within permitted limits",
+      "check": {"field": "emissions.nox_compliant", "op": "is_true"},
+      "severity": "major",
+      "remediation": "Service or retrofit fleet engines (SCR/EGR) and verify stack/emitter compliance testing.",
+      "framework_ref": "IFC PS3"
+    },
+    {
+      "id": "EMI-006",
+      "description": "Refrigerant/ozone-depleting substances register must be maintained",
+      "check": {"field": "emissions.ods_register", "op": "present"},
+      "severity": "minor",
+      "remediation": "Maintain an inventory of ozone-depleting substances with leak-check records and phase-out plan.",
+      "framework_ref": "GRI 305-6"
+    }
+  ]
+}

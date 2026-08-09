@@ -1,0 +1,54 @@
+{
+  "category": "community",
+  "title": "Community & Social Performance",
+  "rules": [
+    {
+      "id": "COM-001",
+      "description": "Free, prior and informed consent (FPIC) or equivalent agreement must be documented",
+      "check": {"field": "community.consent_agreement", "op": "present"},
+      "severity": "critical",
+      "remediation": "Execute a documented FPIC process or land-use agreement with affected Indigenous communities before land disturbance.",
+      "framework_ref": "IFC PS7 / UNDRIP"
+    },
+    {
+      "id": "COM-002",
+      "description": "A stakeholder engagement plan must be maintained",
+      "check": {"field": "community.stakeholder_engagement_plan", "op": "present"},
+      "severity": "major",
+      "remediation": "Prepare a stakeholder engagement plan with a stakeholder register, engagement schedule and disclosure commitments.",
+      "framework_ref": "IFC PS1 / GRI 413-1"
+    },
+    {
+      "id": "COM-003",
+      "description": "A functioning grievance mechanism must be available to communities",
+      "check": {"field": "community.grievance_mechanism_active", "op": "is_true"},
+      "severity": "major",
+      "remediation": "Establish an accessible grievance mechanism with defined response times and escalation paths; publicise it locally.",
+      "framework_ref": "GRI 2-25 / IFC PS1"
+    },
+    {
+      "id": "COM-004",
+      "description": "Unresolved community grievances older than 90 days must be zero",
+      "check": {"field": "community.grievances_open_over_90d", "op": "lte", "value": 0},
+      "severity": "major",
+      "remediation": "Prioritise resolution of aged grievances; assign owners and report progress to the community liaison committee.",
+      "framework_ref": "GRI 413-1"
+    },
+    {
+      "id": "COM-005",
+      "description": "A cultural heritage survey must be completed before ground disturbance",
+      "check": {"field": "community.heritage_survey_completed", "op": "is_true"},
+      "severity": "critical",
+      "remediation": "Commission a cultural heritage survey with traditional owners and register avoidance zones before clearing.",
+      "framework_ref": "IFC PS8"
+    },
+    {
+      "id": "COM-006",
+      "description": "Local employment share should meet the committed target (%)",
+      "check": {"field": "community.local_employment_pct", "op": "gte", "value": 20},
+      "severity": "minor",
+      "remediation": "Implement local hiring and training programs to reach the committed local employment share.",
+      "framework_ref": "GRI 203-2"
+    }
+  ]
+}
