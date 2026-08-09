@@ -281,6 +281,8 @@ from .innovations.geoai import router as geoai_router
 from .innovations.geodb import router as geodb_router
 from .innovations.geotoolkit import router as geotoolkit_router
 from .innovations.geotoolkit_ext import router as geotoolkit_ext_router
+from .innovations.geomodel import router as geomodel_router
+from .innovations.drill_planner import router as drill_planner_router
 
 for _innovation_router in (
     jorc_reporter_router,
@@ -309,6 +311,8 @@ for _innovation_router in (
     geodb_router,
     geotoolkit_router,
     geotoolkit_ext_router,
+    geomodel_router,
+    drill_planner_router,
 ):
     app.include_router(_innovation_router)
 
