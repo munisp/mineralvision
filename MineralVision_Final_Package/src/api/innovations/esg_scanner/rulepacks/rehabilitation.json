@@ -1,0 +1,54 @@
+{
+  "category": "rehabilitation",
+  "title": "Rehabilitation & Closure",
+  "rules": [
+    {
+      "id": "REH-001",
+      "description": "An approved mine closure plan must be in place",
+      "check": {"field": "rehabilitation.closure_plan", "op": "present"},
+      "severity": "critical",
+      "remediation": "Prepare and obtain regulatory approval for a mine closure plan with post-closure land-use objectives.",
+      "framework_ref": "IFC PS6 / GRI 402"
+    },
+    {
+      "id": "REH-002",
+      "description": "A closure cost estimate (rehabilitation liability) must be maintained",
+      "check": {"field": "rehabilitation.closure_cost_estimate", "op": "present"},
+      "severity": "major",
+      "remediation": "Commission a third-party closure liability estimate updated at least every 3 years.",
+      "framework_ref": "GISTM 10.7"
+    },
+    {
+      "id": "REH-003",
+      "description": "Financial provisioning must cover at least 100% of the closure liability",
+      "check": {"field": "rehabilitation.provisioning_coverage_ratio", "op": "gte", "value": 1.0},
+      "severity": "critical",
+      "remediation": "Increase the rehabilitation bond/trust provisioning to fully cover the current closure cost estimate.",
+      "framework_ref": "IFC PS1"
+    },
+    {
+      "id": "REH-004",
+      "description": "Progressive rehabilitation must keep pace: at least 30% of available disturbance rehabilitated",
+      "check": {"field": "rehabilitation.progressive_rehab_pct", "op": "gte", "value": 30},
+      "severity": "major",
+      "remediation": "Accelerate progressive rehabilitation of completed areas (topsoil, re-contour, reseed) in the next campaign.",
+      "framework_ref": "GRI 304-3"
+    },
+    {
+      "id": "REH-005",
+      "description": "Topsoil stockpiles must be inventoried for closure use",
+      "check": {"field": "rehabilitation.topsoil_inventory_m3", "op": "present"},
+      "severity": "minor",
+      "remediation": "Survey and record topsoil stockpile volumes and locations for rehabilitation planning.",
+      "framework_ref": "IFC PS6"
+    },
+    {
+      "id": "REH-006",
+      "description": "A biodiversity management plan must exist where significant habitat is disturbed",
+      "check": {"field": "rehabilitation.biodiversity_plan", "op": "present"},
+      "severity": "major",
+      "remediation": "Develop a biodiversity management plan addressing threatened species and offset requirements.",
+      "framework_ref": "IFC PS6 / GRI 304-2"
+    }
+  ]
+}
