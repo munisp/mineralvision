@@ -32,8 +32,8 @@ COPY src/ /app/src/
 RUN mkdir -p /app/models /app/data
 
 # Download WALDO model (can be commented out if models are mounted as volume)
+# gdown is pinned in requirements.txt
 RUN mkdir -p /app/models && \
-    pip3 install gdown && \
     gdown --id 1_QS9GgFjgZ7Jh5TQH4K5Gl5E8QI8mwg -O /app/models/waldo_v3.pt
 
 # Set up entry point

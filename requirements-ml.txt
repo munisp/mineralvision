@@ -1,0 +1,10 @@
+# MineralVision Platform - Heavy ML Dependencies (optional install)
+# Install with: pip install -r requirements-ml.txt
+# Required only for WALDO detection training/inference and deep-learning
+# pipelines. Excluded from the lean API image.
+-r requirements.txt
+
+torch==2.13.0
+ultralytics==8.4.116
+pytorch-lightning==2.6.5
+transformers==5.14.1

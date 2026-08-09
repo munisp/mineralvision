@@ -1,0 +1,37 @@
+# MineralVision WALDO Detection Service - Dependencies (pinned)
+# Used by deployment/cloud/Dockerfile (build context = this directory).
+# NOTE: the WALDO image (nvidia/cuda ubuntu22.04) runs Python 3.10, so pins
+# here are the latest stable releases compatible with Python 3.10.
+
+# Serving
+flask==3.1.3
+flask-cors==6.0.5
+werkzeug==3.1.8
+
+# Detection / deep learning
+torch==2.13.0
+torchvision==0.28.0
+ultralytics==8.4.116
+rfdetr==1.9.1
+supervision==0.30.0
+
+# Vision & science
+numpy==2.2.6
+scipy==1.15.3
+matplotlib==3.10.8
+pillow==12.3.0
+opencv-python-headless==5.0.0.93
+
+# Model export / edge runtimes (optional backends are imported lazily)
+onnx==1.22.0
+onnxruntime==1.23.2
+
+# Persistence & ops
+psycopg2-binary==2.9.12
+prometheus-client==0.26.0
+psutil==7.2.2
+
+# Utilities
+pyyaml==6.0.3
+requests==2.34.2
+gdown==6.1.0
