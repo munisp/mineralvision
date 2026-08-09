@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:16
+    image: postgis/postgis:16-3.4
     environment:
       POSTGRES_USER: mineralvision
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
