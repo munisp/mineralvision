@@ -21,7 +21,6 @@ import {
   ChevronRight,
   Thermometer,
   Beaker,
-  Sprout,
   Box,
 } from 'lucide-react';
 
@@ -29,7 +28,7 @@ import {
 // SCENARIO TYPES AND DATA
 // ============================================================================
 
-type ScenarioType = 'gold_mine' | 'ginger_soil';
+type ScenarioType = 'gold_mine' | 'outcrop_survey';
 
 interface Detection {
   id: string;
@@ -100,57 +99,57 @@ const goldMineAnalysis = {
   evidence: 'Bench geometry + haul roads + stockpiles indicate active open pit operation. Bright oxidized zones (gossan) consistent with hematite/limonite after sulfide. Milky drainage plume suggests suspended solids from processing.',
 };
 
-// Ginger Soil Assessment Scenario Data
-const gingerSoilAnalysis = {
-  title: 'Ginger Soil Suitability Assessment',
+// Outcrop Survey Assessment Scenario Data
+const outcropSurveyAnalysis = {
+  title: 'Outcrop & Alteration Assessment',
   mainFinding: {
-    label: 'Soil Suitability for Ginger',
+    label: 'Prospectivity Index for Epithermal Au',
     score: 78,
     rating: 'Good',
   },
-  soilProfile: {
-    textureClass: 'Sandy Loam',
+  regolithProfile: {
+    textureClass: 'Saprolite over bedrock',
     drainageClass: 'Well-drained',
     slope: '2-5%',
-    depth: '45+ cm',
-    color: 'Dark brown (10YR 3/3)',
+    depth: '45+ cm to bedrock',
+    color: 'Dark brown, Fe-stained (10YR 3/3)',
   },
   chemicalProperties: {
     pH: { value: 5.8, optimal: '5.5-6.5', status: 'optimal' },
-    EC: { value: 0.8, optimal: '<2.0 dS/m', status: 'optimal' },
-    organicMatter: { value: 3.2, optimal: '>3%', status: 'optimal' },
-    CEC: { value: 12.5, optimal: '10-25 meq/100g', status: 'optimal' },
-    nitrogen: { value: 0.18, optimal: '>0.15%', status: 'optimal' },
-    phosphorus: { value: 18, optimal: '>15 ppm', status: 'optimal' },
-    potassium: { value: 145, optimal: '>120 ppm', status: 'optimal' },
+    gold: { value: 0.8, optimal: '>0.5 ppm Au', status: 'optimal' },
+    arsenic: { value: 3.2, optimal: '>2 ppm As', status: 'optimal' },
+    copper: { value: 12.5, optimal: '10-25 ppm Cu', status: 'optimal' },
+    silver: { value: 0.18, optimal: '>0.15 ppm Ag', status: 'optimal' },
+    lead: { value: 18, optimal: '>15 ppm Pb', status: 'optimal' },
+    zinc: { value: 145, optimal: '>120 ppm Zn', status: 'optimal' },
   },
   physicalProperties: {
-    waterHolding: { value: 'Moderate', status: 'good' },
-    compaction: { value: 'Low risk', status: 'good' },
-    aeration: { value: 'Good', status: 'good' },
+    oxidation: { value: 'Strong (gossanous)', status: 'good' },
+    veining: { value: 'Quartz veins present', status: 'good' },
+    alteration: { value: 'Argillic-phyllic', status: 'good' },
   },
   limitingFactors: [
-    { factor: 'Slight slope may require contour planting', severity: 'low' },
-    { factor: 'Monitor drainage during heavy rains', severity: 'low' },
+    { factor: 'Slight slope may complicate drill pad placement', severity: 'low' },
+    { factor: 'Monitor seasonal drainage across survey lines', severity: 'low' },
   ],
-  diseaseRisk: {
-    pythium: { risk: 'Low', confidence: 0.85 },
-    fusarium: { risk: 'Low', confidence: 0.82 },
-    bacterialWilt: { risk: 'Moderate', confidence: 0.78 },
+  riskFactors: {
+    access: { risk: 'Low', confidence: 0.85 },
+    permitting: { risk: 'Low', confidence: 0.82 },
+    structuralComplexity: { risk: 'Moderate', confidence: 0.78 },
   },
   recommendations: [
-    'Proceed with ginger planting - soil conditions are favorable',
-    'Use raised beds (15-20cm) to ensure optimal drainage',
-    'Apply 2-3 tons/ha compost before planting to maintain OM',
-    'Split nitrogen applications: 40% basal, 30% at 45 days, 30% at 90 days',
-    'Mulch with rice straw (5cm) to maintain moisture and temperature',
-    'Monitor for bacterial wilt - use disease-free seed rhizomes',
-    'Install soil moisture sensors for irrigation scheduling',
+    'Proceed with detailed mapping - surface indicators are favorable',
+    'Collect rock chip samples (5-8 per outcrop) for assay',
+    'Run infill soil geochemistry at 25m spacing over the anomaly',
+    'Plan IP/resistivity survey across the alteration halo',
+    'Trench across the quartz vein trend to expose fresh bedrock',
+    'Prioritize target for first-pass scout drilling',
+    'Log all samples in the QAQC-tracked drillhole database',
   ],
-  expectedYield: {
-    estimate: '18-22 tons/ha',
+  explorationTarget: {
+    estimate: '0.8-1.2 g/t Au (conceptual)',
     confidence: 0.75,
-    factors: 'Based on soil quality, climate data, and regional benchmarks',
+    factors: 'Based on geochemistry, alteration mapping, and regional analogues',
   },
 };
 
@@ -397,11 +396,11 @@ function GoldMineSurveyOverlay({ show }: { show: boolean }) {
   );
 }
 
-// Soil Survey Overlay for Ginger Soil Assessment
-function SoilSurveyOverlay({ show }: { show: boolean }) {
+// Outcrop Survey Overlay for Outcrop Survey Assessment
+function OutcropSurveyOverlay({ show }: { show: boolean }) {
   if (!show) return null;
 
-  // Sample points with suitability scores
+  // Sample points with prospectivity scores
   const samplePoints = [
     { id: 'S1', x: 120, y: 80, score: 85, label: 'Sample 1' },
     { id: 'S2', x: 280, y: 60, score: 78, label: 'Sample 2' },
@@ -422,7 +421,7 @@ function SoilSurveyOverlay({ show }: { show: boolean }) {
 
   return (
     <svg className="absolute inset-0 pointer-events-none" viewBox="0 0 640 360" preserveAspectRatio="none">
-      {/* Field boundary polygon */}
+      {/* Survey boundary polygon */}
       <polygon
         points="40,40 600,30 620,320 50,340"
         fill="none"
@@ -432,7 +431,7 @@ function SoilSurveyOverlay({ show }: { show: boolean }) {
         className="animate-pulse"
       />
       
-      {/* Suitability heatmap zones (simplified gradient zones) */}
+      {/* Prospectivity heatmap zones (simplified gradient zones) */}
       <ellipse cx="320" cy="160" rx="180" ry="100" fill="#22c55e" opacity="0.15" />
       <ellipse cx="280" cy="140" rx="120" ry="70" fill="#22c55e" opacity="0.2" />
       <ellipse cx="150" cy="280" rx="80" ry="50" fill="#eab308" opacity="0.2" />
@@ -504,7 +503,7 @@ function SoilSurveyOverlay({ show }: { show: boolean }) {
       {/* Legend */}
       <g transform="translate(500, 20)">
         <rect x="0" y="0" width="120" height="70" fill="#1f2937" opacity="0.9" rx="4" />
-        <text x="10" y="16" fill="white" fontSize="10" fontWeight="bold">Suitability Index</text>
+        <text x="10" y="16" fill="white" fontSize="10" fontWeight="bold">Prospectivity Index</text>
         <circle cx="20" cy="32" r="6" fill="#22c55e" />
         <text x="32" y="36" fill="#9ca3af" fontSize="9">High (80+)</text>
         <circle cx="20" cy="48" r="6" fill="#eab308" />
@@ -515,7 +514,7 @@ function SoilSurveyOverlay({ show }: { show: boolean }) {
 
       {/* Title label */}
       <rect x="10" y="320" width="200" height="30" fill="#1f2937" opacity="0.9" rx="4" />
-      <text x="20" y="340" fill="#22c55e" fontSize="11" fontWeight="bold">Soil Survey Grid (Demo)</text>
+      <text x="20" y="340" fill="#22c55e" fontSize="11" fontWeight="bold">Outcrop Survey Grid (Demo)</text>
     </svg>
   );
 }
@@ -633,7 +632,7 @@ function GoldMineResultCard({ analysis, show }: { analysis: typeof goldMineAnaly
   );
 }
 
-function GingerSoilResultCard({ analysis, show }: { analysis: typeof gingerSoilAnalysis; show: boolean }) {
+function OutcropSurveyResultCard({ analysis, show }: { analysis: typeof outcropSurveyAnalysis; show: boolean }) {
   if (!show) return null;
 
   const getStatusColor = (status: string) => {
@@ -648,10 +647,10 @@ function GingerSoilResultCard({ analysis, show }: { analysis: typeof gingerSoilA
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Main Finding - Suitability Score */}
+      {/* Main Finding - Prospectivity Score */}
       <div className="bg-card border border-border rounded-lg p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-          <Sprout className="h-4 w-4 text-green-400" />
+          <Mountain className="h-4 w-4 text-green-400" />
           {analysis.title}
         </h3>
         <div className="bg-green-500/10 border border-green-500/30 p-4 rounded-lg">
@@ -671,14 +670,14 @@ function GingerSoilResultCard({ analysis, show }: { analysis: typeof gingerSoilA
         </div>
       </div>
 
-      {/* Soil Profile */}
+      {/* Regolith Profile */}
       <div className="bg-card border border-border rounded-lg p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
           <Layers className="h-4 w-4 text-amber-600" />
-          Soil Profile
+          Regolith Profile
         </h3>
         <div className="grid grid-cols-2 gap-2">
-          {Object.entries(analysis.soilProfile).map(([key, value]) => (
+          {Object.entries(analysis.regolithProfile).map(([key, value]) => (
             <div key={key} className="p-2 bg-secondary/30 rounded-lg">
               <span className="text-xs text-muted-foreground capitalize">{key.replace(/([A-Z])/g, ' $1')}</span>
               <p className="text-sm font-medium text-foreground">{value}</p>
@@ -698,7 +697,7 @@ function GingerSoilResultCard({ analysis, show }: { analysis: typeof gingerSoilA
             <div key={key} className="flex items-center justify-between p-2 bg-secondary/30 rounded-lg">
               <span className="text-xs text-muted-foreground uppercase">{key}</span>
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-foreground">{data.value}{key === 'pH' ? '' : key === 'EC' ? ' dS/m' : key === 'organicMatter' || key === 'nitrogen' ? '%' : ' ppm'}</span>
+                <span className="text-sm font-medium text-foreground">{data.value}{key === 'pH' ? '' : ' ppm'}</span>
                 <span className={`text-xs ${getStatusColor(data.status)}`}>({data.optimal})</span>
                 <CheckCircle className={`h-3 w-3 ${getStatusColor(data.status)}`} />
               </div>
@@ -723,16 +722,16 @@ function GingerSoilResultCard({ analysis, show }: { analysis: typeof gingerSoilA
         </div>
       </div>
 
-      {/* Disease Risk */}
+      {/* Exploration Risk */}
       <div className="bg-card border border-border rounded-lg p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
           <AlertTriangle className="h-4 w-4 text-yellow-400" />
-          Disease Risk Assessment
+          Exploration Risk Assessment
         </h3>
         <div className="grid grid-cols-3 gap-2">
-          {Object.entries(analysis.diseaseRisk).map(([disease, data]) => (
-            <div key={disease} className={`p-2 rounded-lg text-center ${data.risk === 'Low' ? 'bg-green-500/10' : data.risk === 'Moderate' ? 'bg-yellow-500/10' : 'bg-red-500/10'}`}>
-              <span className="text-xs text-muted-foreground capitalize">{disease}</span>
+          {Object.entries(analysis.riskFactors).map(([factor, data]) => (
+            <div key={factor} className={`p-2 rounded-lg text-center ${data.risk === 'Low' ? 'bg-green-500/10' : data.risk === 'Moderate' ? 'bg-yellow-500/10' : 'bg-red-500/10'}`}>
+              <span className="text-xs text-muted-foreground capitalize">{factor}</span>
               <p className={`text-sm font-bold ${data.risk === 'Low' ? 'text-green-400' : data.risk === 'Moderate' ? 'text-yellow-400' : 'text-red-400'}`}>{data.risk}</p>
             </div>
           ))}
@@ -756,18 +755,18 @@ function GingerSoilResultCard({ analysis, show }: { analysis: typeof gingerSoilA
         </div>
       )}
 
-      {/* Expected Yield */}
+      {/* Exploration Target */}
       <div className="bg-card border border-border rounded-lg p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
           <TrendingUp className="h-4 w-4 text-green-400" />
-          Expected Yield
+          Exploration Target
         </h3>
         <div className="bg-green-500/10 border border-green-500/30 p-3 rounded-lg">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Estimated Yield</span>
-            <span className="text-xl font-bold text-green-400">{analysis.expectedYield.estimate}</span>
+            <span className="text-sm text-muted-foreground">Conceptual Grade</span>
+            <span className="text-xl font-bold text-green-400">{analysis.explorationTarget.estimate}</span>
           </div>
-          <p className="text-xs text-muted-foreground mt-2">{analysis.expectedYield.factors}</p>
+          <p className="text-xs text-muted-foreground mt-2">{analysis.explorationTarget.factors}</p>
         </div>
       </div>
 
@@ -775,7 +774,7 @@ function GingerSoilResultCard({ analysis, show }: { analysis: typeof gingerSoilA
       <div className="bg-card border border-border rounded-lg p-4">
         <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
           <Target className="h-4 w-4 text-primary" />
-          Cultivation Recommendations
+          Exploration Recommendations
         </h3>
         <div className="space-y-1">
           {analysis.recommendations.map((rec, idx) => (
@@ -903,7 +902,7 @@ export default function Molmo2Page() {
             disabled={isAnalyzing}
           >
             <option value="gold_mine">Gold Mine Analysis</option>
-            <option value="ginger_soil">Ginger Soil Assessment</option>
+            <option value="outcrop_survey">Outcrop Survey Assessment</option>
           </select>
           
           <button
@@ -931,7 +930,7 @@ export default function Molmo2Page() {
           {analysisComplete && (
             <button
               onClick={() => {
-                const data = scenario === 'gold_mine' ? goldMineAnalysis : gingerSoilAnalysis;
+                const data = scenario === 'gold_mine' ? goldMineAnalysis : outcropSurveyAnalysis;
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
@@ -981,9 +980,9 @@ export default function Molmo2Page() {
                 </div>
               ) : (
                 <div className="text-center">
-                  <Sprout className="h-16 w-16 text-green-600/50 mx-auto mb-2" />
-                  <span className="text-gray-500 text-sm">Ginger Farm - Soil Survey</span>
-                  <div className="mt-1 text-xs text-gray-600">Site: Farm Block C-12</div>
+                  <Mountain className="h-16 w-16 text-green-600/50 mx-auto mb-2" />
+                  <span className="text-gray-500 text-sm">Gold Prospect - Outcrop Survey</span>
+                  <div className="mt-1 text-xs text-gray-600">Site: Tenement Block E-12</div>
                   <div className="text-xs text-gray-600">Area: 15 hectares</div>
                 </div>
               )}
@@ -994,9 +993,9 @@ export default function Molmo2Page() {
               <GoldMineSurveyOverlay show={showDetections} />
             )}
 
-            {/* Soil Survey Overlay - Only for ginger soil */}
-            {scenario === 'ginger_soil' && (
-              <SoilSurveyOverlay show={showDetections} />
+            {/* Outcrop Survey Overlay - Only for outcrop survey */}
+            {scenario === 'outcrop_survey' && (
+              <OutcropSurveyOverlay show={showDetections} />
             )}
 
             {/* Status overlay */}
@@ -1030,8 +1029,8 @@ export default function Molmo2Page() {
             </div>
           )}
 
-          {/* Soil survey summary */}
-          {showDetections && scenario === 'ginger_soil' && (
+          {/* Outcrop survey summary */}
+          {showDetections && scenario === 'outcrop_survey' && (
             <div className="p-3 bg-secondary/30 border-t border-border">
               <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
@@ -1040,7 +1039,7 @@ export default function Molmo2Page() {
                 </span>
                 <span className="flex items-center gap-1">
                   <Layers className="h-3 w-3 text-green-400" />
-                  Suitability interpolation applied
+                  Prospectivity interpolation applied
                 </span>
               </div>
             </div>
@@ -1059,7 +1058,7 @@ export default function Molmo2Page() {
               <div className="text-xs text-muted-foreground">
                 {scenario === 'gold_mine' 
                   ? 'This will analyze drone imagery for gold mining indicators, geological features, and environmental risks.'
-                  : 'This will assess soil properties for ginger cultivation suitability, including chemical and physical analysis.'}
+                  : 'This will assess lithology, alteration, and geochemical indicators across the outcrop survey grid.'}
               </div>
             </div>
           )}
@@ -1078,15 +1077,15 @@ export default function Molmo2Page() {
             <GoldMineResultCard analysis={goldMineAnalysis} show={true} />
           )}
 
-          {analysisComplete && scenario === 'ginger_soil' && (
-            <GingerSoilResultCard analysis={gingerSoilAnalysis} show={true} />
+          {analysisComplete && scenario === 'outcrop_survey' && (
+            <OutcropSurveyResultCard analysis={outcropSurveyAnalysis} show={true} />
           )}
         </div>
       </div>
 
       {/* Footer info */}
       <div className="bg-secondary/30 border border-border rounded-lg p-3 text-xs text-muted-foreground">
-        <span className="font-medium text-foreground">AI Pipeline:</span> This analysis uses the Molmo2 ensemble pipeline integrating YOLO11, RF-DETR, SAM3, and V-JEPA models for comprehensive geological and agricultural assessment. Connect to backend services for real-time inference.
+        <span className="font-medium text-foreground">AI Pipeline:</span> This analysis uses the Molmo2 ensemble pipeline integrating YOLO11, RF-DETR, SAM3, and V-JEPA models for comprehensive geological and lithological assessment. Connect to backend services for real-time inference.
       </div>
     </div>
   );

@@ -19,7 +19,6 @@ import {
   ArrowRight,
   Mountain,
   Droplets,
-  Leaf,
   Gem,
   Play,
   Image,
@@ -31,7 +30,7 @@ import {
 interface InsightCard {
   id: string;
   type: 'anomaly' | 'change' | 'similarity';
-  category: 'gold' | 'lithium' | 'soil' | 'general';
+  category: 'gold' | 'lithium' | 'alteration' | 'general';
   confidence: 'high' | 'medium' | 'low';
   what: string;
   why: string;
@@ -76,12 +75,12 @@ const mockInsights: InsightCard[] = [
   {
     id: '3',
     type: 'similarity',
-    category: 'soil',
+    category: 'alteration',
     confidence: 'high',
-    what: 'Soil texture matches high-yield cocoa zones',
-    why: 'Top 5 nearest neighbors are all from verified high-yield cocoa plantations. Texture indicates good drainage, organic matter content, and appropriate clay fraction.',
-    nextAction: 'Confirm with soil EC test and pH measurement. If confirmed, this 15-hectare zone is suitable for cocoa expansion. Recommend 3 verification pits.',
-    location: { lat: 6.5244, lng: 3.3792, name: 'Farm Block C-12' },
+    what: 'Alteration signature matches epithermal Au target zones',
+    why: 'Top 5 nearest neighbors are all from verified epithermal gold systems. Spectral texture indicates argillic-phyllic alteration with iron-oxide staining consistent with a preserved high-level system.',
+    nextAction: 'Confirm with rock chip sampling and portable XRF across the alteration halo. If confirmed, prioritize this 15-hectare zone for grid-based soil geochemistry. Recommend 3 verification traverses.',
+    location: { lat: 6.5244, lng: 3.3792, name: 'Tenement Block E-12' },
     timestamp: '2025-12-21T08:45:00Z',
     similarityScore: 89,
     status: 'reviewed',
@@ -89,12 +88,12 @@ const mockInsights: InsightCard[] = [
   {
     id: '4',
     type: 'anomaly',
-    category: 'soil',
+    category: 'alteration',
     confidence: 'medium',
-    what: 'Potential salinity stress pattern identified',
-    why: 'Texture anomaly in satellite imagery correlates with known salinity indicators. Pattern is 78th percentile unusual compared to baseline healthy vegetation.',
-    nextAction: 'Urgent: Measure soil EC at flagged locations. If EC > 4 dS/m, implement drainage improvement. Check irrigation water source quality.',
-    location: { lat: 6.4521, lng: 3.4012, name: 'Irrigation Zone D' },
+    what: 'Potential gossanous iron-staining pattern identified',
+    why: 'Texture anomaly in satellite imagery correlates with known oxidation indicators above sulfide bodies. Pattern is 78th percentile unusual compared to baseline unaltered bedrock.',
+    nextAction: 'Urgent: Ground-truth flagged locations with portable XRF. If Fe-staining is confirmed with anomalous base metals, extend alteration mapping and prioritize follow-up geochemistry.',
+    location: { lat: 6.4521, lng: 3.4012, name: 'Tenement Block D-4' },
     timestamp: '2025-12-19T16:20:00Z',
     anomalyScore: 78,
     status: 'actioned',
@@ -163,7 +162,7 @@ function CategoryIcon({ category }: { category: string }) {
   const icons = {
     gold: <Gem className="h-5 w-5 text-yellow-400" />,
     lithium: <Droplets className="h-5 w-5 text-blue-400" />,
-    soil: <Leaf className="h-5 w-5 text-green-400" />,
+    alteration: <Layers className="h-5 w-5 text-orange-400" />,
     general: <Mountain className="h-5 w-5 text-gray-400" />,
   };
   return icons[category as keyof typeof icons] || icons.general;
@@ -331,7 +330,7 @@ interface AnalysisPipelineStage {
   duration?: number;
 }
 
-type AnalysisScenario = 'gold_anomaly' | 'lithium_change' | 'soil_similarity';
+type AnalysisScenario = 'gold_anomaly' | 'lithium_change' | 'alteration_similarity';
 
 // Anomaly detection points for gold scenario
 const goldAnomalyPoints = [
@@ -349,13 +348,13 @@ const lithiumChangeZones = [
   { id: 'C3', cx: 280, cy: 260, rx: 70, ry: 45, change: 8, type: 'evaporation' },
 ];
 
-// Similarity matches for soil scenario
-const soilSimilarityMatches = [
-  { id: 'S1', x: 120, y: 100, similarity: 92, match: 'high_yield_cocoa' },
-  { id: 'S2', x: 300, y: 140, similarity: 89, match: 'high_yield_cocoa' },
-  { id: 'S3', x: 450, y: 180, similarity: 85, match: 'good_drainage' },
-  { id: 'S4', x: 180, y: 240, similarity: 78, match: 'organic_rich' },
-  { id: 'S5', x: 380, y: 280, similarity: 75, match: 'sandy_loam' },
+// Similarity matches for alteration scenario
+const alterationSimilarityMatches = [
+  { id: 'S1', x: 120, y: 100, similarity: 92, match: 'epithermal_au' },
+  { id: 'S2', x: 300, y: 140, similarity: 89, match: 'epithermal_au' },
+  { id: 'S3', x: 450, y: 180, similarity: 85, match: 'argillic_alteration' },
+  { id: 'S4', x: 180, y: 240, similarity: 78, match: 'iron_oxide_staining' },
+  { id: 'S5', x: 380, y: 280, similarity: 75, match: 'silicified_zone' },
 ];
 
 function AnalysisDemoOverlay({ scenario, show }: { scenario: AnalysisScenario; show: boolean }) {
@@ -446,14 +445,14 @@ function AnalysisDemoOverlay({ scenario, show }: { scenario: AnalysisScenario; s
     );
   }
 
-  if (scenario === 'soil_similarity') {
+  if (scenario === 'alteration_similarity') {
     return (
       <svg className="absolute inset-0 pointer-events-none" viewBox="0 0 640 360" preserveAspectRatio="none">
         {/* Field boundary */}
         <polygon points="40,40 600,30 620,320 50,340" fill="none" stroke="#22c55e" strokeWidth="2" strokeDasharray="8,4" className="animate-pulse" />
         
         {/* Similarity matches */}
-        {soilSimilarityMatches.map((match, idx) => (
+        {alterationSimilarityMatches.map((match, idx) => (
           <g key={match.id} className="animate-fade-in" style={{ animationDelay: `${idx * 150}ms` }}>
             <rect x={match.x - 30} y={match.y - 20} width="60" height="40" fill="#22c55e" opacity="0.2" stroke="#22c55e" strokeWidth="2" rx="4" />
             <text x={match.x} y={match.y - 5} fill="white" fontSize="11" textAnchor="middle" fontWeight="bold">{match.similarity}%</text>
@@ -528,13 +527,13 @@ function InteractiveAnalysisDemo() {
   const scenarioLabels = {
     gold_anomaly: 'Gold Anomaly Detection',
     lithium_change: 'Lithium Change Detection',
-    soil_similarity: 'Soil Similarity Search',
+    alteration_similarity: 'Alteration Similarity Search',
   };
 
   const scenarioDescriptions = {
     gold_anomaly: 'Detect unusual alteration textures and geological anomalies in drone imagery',
     lithium_change: 'Monitor brine pond evolution and surface changes over time',
-    soil_similarity: 'Find areas similar to known high-yield agricultural zones',
+    alteration_similarity: 'Find areas similar to known hydrothermal alteration zones',
   };
 
   return (
@@ -556,7 +555,7 @@ function InteractiveAnalysisDemo() {
           >
             <option value="gold_anomaly">Gold Anomaly Detection</option>
             <option value="lithium_change">Lithium Change Detection</option>
-            <option value="soil_similarity">Soil Similarity Search</option>
+            <option value="alteration_similarity">Alteration Similarity Search</option>
           </select>
           <button
             onClick={runAnalysis}
@@ -603,7 +602,7 @@ function InteractiveAnalysisDemo() {
             <div className="text-center">
               {scenario === 'gold_anomaly' && <Gem className="h-12 w-12 text-yellow-600/50 mx-auto mb-2" />}
               {scenario === 'lithium_change' && <Droplets className="h-12 w-12 text-blue-600/50 mx-auto mb-2" />}
-              {scenario === 'soil_similarity' && <Leaf className="h-12 w-12 text-green-600/50 mx-auto mb-2" />}
+              {scenario === 'alteration_similarity' && <Layers className="h-12 w-12 text-orange-600/50 mx-auto mb-2" />}
               <span className="text-gray-500 text-sm">{scenarioLabels[scenario]}</span>
               <div className="mt-1 text-xs text-gray-600">{scenarioDescriptions[scenario]}</div>
             </div>
@@ -665,14 +664,14 @@ function InteractiveAnalysisDemo() {
                   </div>
                 </>
               )}
-              {scenario === 'soil_similarity' && (
+              {scenario === 'alteration_similarity' && (
                 <>
                   <div className="p-2 bg-green-500/10 border border-green-500/30 rounded">
                     <span className="text-xs text-green-400">5 similar zones found</span>
                   </div>
                   <div className="text-xs text-muted-foreground">
-                    <p className="mb-1"><strong className="text-foreground">Best match:</strong> 92% (high yield cocoa)</p>
-                    <p><strong className="text-foreground">Action:</strong> Verify with soil EC test at S1, S2</p>
+                    <p className="mb-1"><strong className="text-foreground">Best match:</strong> 92% (epithermal Au)</p>
+                    <p><strong className="text-foreground">Action:</strong> Verify with rock chip sampling at S1, S2</p>
                   </div>
                 </>
               )}
@@ -722,7 +721,7 @@ export default function AIInsightsPage() {
             AI Insights (V-JEPA)
           </h1>
           <p className="text-muted-foreground mt-1">
-            Automated analysis of mining and soil imagery using deep learning
+            Automated analysis of mining and exploration imagery using deep learning
           </p>
         </div>
         <div className="flex gap-2">
@@ -804,7 +803,7 @@ export default function AIInsightsPage() {
           <option value="all">All Categories</option>
           <option value="gold">Gold Exploration</option>
           <option value="lithium">Lithium Exploration</option>
-          <option value="soil">Soil Analysis</option>
+          <option value="alteration">Alteration Analysis</option>
         </select>
 
         <select
@@ -888,7 +887,7 @@ export default function AIInsightsPage() {
             <div>
               <h3 className="font-medium text-foreground">Similarity Search</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                Finds areas that look similar to known examples. Use this to find more of what you've already identified - alteration zones, soil types, or geological features.
+                Finds areas that look similar to known examples. Use this to find more of what you've already identified - alteration zones, regolith types, or geological features.
               </p>
             </div>
           </div>
