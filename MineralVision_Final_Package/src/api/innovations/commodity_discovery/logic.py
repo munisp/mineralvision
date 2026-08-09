@@ -90,7 +90,7 @@ def build_brine_sample(d: Dict[str, Any]) -> BrineSample:
     from datetime import datetime
     date_raw = d.get("sample_date")
     sample_date = (
-        datetime.fromisoformat(date_raw) if isinstance(date_raw, str) else datetime.utcnow()
+        datetime.fromisoformat(date_raw) if isinstance(date_raw, str) else datetime.now()
     )
     return BrineSample(
         sample_id=d["sample_id"],
