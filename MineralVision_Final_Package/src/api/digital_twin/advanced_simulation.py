@@ -115,9 +115,10 @@ class AbstractSimulation(ABC):
         self._progress_callbacks: List[Callable[[float, str], None]] = []
         self._state_callbacks: List[Callable[[Dict[str, Any]], None]] = []
         
-        # Random state
-        if self.config.random_seed is not None:
-            np.random.seed(self.config.random_seed)
+        # Deterministic local RNG (never seeds/touches the global numpy RNG)
+        self.rng = np.random.default_rng(
+            0 if self.config.random_seed is None else self.config.random_seed
+        )
             
     def set_parameters(self, parameters: Dict[str, Any]) -> None:
         """Set simulation parameters."""
@@ -530,27 +531,31 @@ class TerrainModel:
         
     def generate_from_noise(self, octaves: int = 4, persistence: float = 0.5,
                            scale: float = 100.0, seed: Optional[int] = None) -> None:
-        """Generate terrain using Perlin-like noise."""
-        if seed is not None:
-            np.random.seed(seed)
-            
+        """
+        Generate terrain using Perlin-like noise.
+
+        Fully deterministic: a dedicated local RNG is used (default seed 0
+        when none is given); the global numpy RNG is never touched.
+        """
+        rng = np.random.default_rng(0 if seed is None else seed)
+
         self.heightmap = np.zeros((self.resolution, self.resolution))
-        
+
         for octave in range(octaves):
             freq = 2 ** octave
             amp = persistence ** octave
-            
+
             # Generate noise at this octave
-            noise = self._generate_noise(self.resolution // freq + 1)
-            
+            noise = self._generate_noise(self.resolution // freq + 1, rng)
+
             # Upsample to full resolution
             noise = self._upsample(noise, self.resolution)
-            
+
             self.heightmap += noise * amp * scale
-            
-    def _generate_noise(self, size: int) -> np.ndarray:
-        """Generate random noise."""
-        return np.random.randn(size, size)
+
+    def _generate_noise(self, size: int, rng: np.random.Generator) -> np.ndarray:
+        """Generate deterministic noise from a local RNG."""
+        return rng.standard_normal((size, size))
         
     def _upsample(self, arr: np.ndarray, target_size: int) -> np.ndarray:
         """Upsample array to target size using bilinear interpolation."""
@@ -857,8 +862,11 @@ class GeologicalSimulation(AbstractSimulation):
             seed=self.config.random_seed
         )
         
-        # Initialize mineral concentration
-        self.mineral_concentration = np.random.rand(resolution, resolution) * 0.1
+        # Initialize mineral concentration (deterministic local RNG)
+        rng = np.random.default_rng(
+            0 if self.config.random_seed is None else self.config.random_seed
+        )
+        self.mineral_concentration = rng.random((resolution, resolution)) * 0.1
         
         # Add initial mineral deposits
         for deposit in self.parameters.get('initial_deposits', []):

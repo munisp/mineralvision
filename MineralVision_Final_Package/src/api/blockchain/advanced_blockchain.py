@@ -732,9 +732,12 @@ class EventSubscriber:
             time.sleep(poll_interval)
             
     def _fetch_events(self, from_block: int) -> List[Dict]:
-        """Fetch events from blockchain (simulated)."""
-        # In production, this would use web3.py to fetch real events
-        # For now, return empty list (events come from emit_event)
+        """Fetch events from an external chain.
+
+        No external chain is connected in this deployment (offline ledger);
+        all events originate locally via emit_event(). Returns empty — it
+        never fabricates events.
+        """
         return []
         
     def _process_events(self) -> None:

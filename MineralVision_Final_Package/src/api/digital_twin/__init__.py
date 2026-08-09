@@ -39,6 +39,16 @@ from .advanced_simulation import (
     create_geological_simulation,
 )
 
+from .plant_simulation import (
+    TelemetryPoint,
+    TelemetryStream,
+    AnomalyEvent,
+    Zone,
+    Equipment as PlantEquipment,
+    PlantTwin,
+    create_plant_twin,
+)
+
 from .visualization_3d import (
     RenderMode,
     CameraMode,
@@ -96,6 +106,13 @@ __all__ = [
     "TemporalStateModel",
     "create_equipment_simulation",
     "create_geological_simulation",
+    "TelemetryPoint",
+    "TelemetryStream",
+    "AnomalyEvent",
+    "Zone",
+    "PlantEquipment",
+    "PlantTwin",
+    "create_plant_twin",
     "RenderMode",
     "CameraMode",
     "Color",
