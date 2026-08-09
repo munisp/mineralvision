@@ -5,14 +5,15 @@ This module provides pytest fixtures and configuration for the MineralVision tes
 """
 
 import os
-import sys
-import json
-import pytest
-import tempfile
 import shutil
+import sys
+import tempfile
+from collections.abc import Generator
 from datetime import datetime
-from typing import Dict, Any, Generator
+from typing import Any
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 # Add source directories to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'MineralVision_Enhanced', 'lakehouse_architecture'))
@@ -38,7 +39,7 @@ TEST_CONFIG = {
 
 
 @pytest.fixture(scope="session")
-def test_config() -> Dict[str, Any]:
+def test_config() -> dict[str, Any]:
     """Provide test configuration."""
     return TEST_CONFIG.copy()
 
@@ -52,7 +53,7 @@ def temp_dir() -> Generator[str, None, None]:
 
 
 @pytest.fixture
-def sample_sensor_data() -> Dict[str, Any]:
+def sample_sensor_data() -> dict[str, Any]:
     """Provide sample sensor data for testing."""
     return {
         "sensor_type": "hyperspectral",
@@ -72,7 +73,7 @@ def sample_sensor_data() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def sample_region() -> Dict[str, float]:
+def sample_region() -> dict[str, float]:
     """Provide sample region for testing."""
     return {
         "min_lat": -24.0,
@@ -83,7 +84,7 @@ def sample_region() -> Dict[str, float]:
 
 
 @pytest.fixture
-def sample_mineral_deposit() -> Dict[str, Any]:
+def sample_mineral_deposit() -> dict[str, Any]:
     """Provide sample mineral deposit data."""
     return {
         "name": "Test Deposit",
@@ -142,12 +143,9 @@ def mock_object_store():
 @pytest.fixture
 def local_object_store(temp_dir):
     """Create a local object store for testing."""
-    try:
-        from api.core.object_storage import LocalStorageClient, ObjectStoreConfig, StorageBackendType
-        config = ObjectStoreConfig(backend=StorageBackendType.LOCAL)
-        return LocalStorageClient(config, base_path=temp_dir)
-    except ImportError:
-        return None
+    from api.core.object_storage import LocalStorageClient, ObjectStoreConfig, StorageBackendType
+    config = ObjectStoreConfig(backend=StorageBackendType.LOCAL)
+    return LocalStorageClient(config, base_path=temp_dir)
 
 
 @pytest.fixture
@@ -157,19 +155,6 @@ def mock_postgresql():
         conn = MagicMock()
         mock.return_value = conn
         yield conn
-
-
-@pytest.fixture(scope="session")
-def api_client():
-    """Create FastAPI test client."""
-    try:
-        from fastapi.testclient import TestClient
-        # Import the main app - adjust path as needed
-        # from api.main import app
-        # return TestClient(app)
-        return None
-    except ImportError:
-        return None
 
 
 # Markers for test categorization
