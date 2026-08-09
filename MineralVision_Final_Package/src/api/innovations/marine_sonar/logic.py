@@ -230,17 +230,24 @@ def classify_backscatter(
     if not 2 <= n_classes <= 8:
         raise ValueError("n_classes must be between 2 and 8")
 
+    # Sonar backscatter is multiplicative speckle: work in dB (log) space,
+    # standard practice for mosaic classification.
+    if float(mosaic.min()) > 0:
+        work = 20.0 * np.log10(mosaic)
+    else:
+        work = mosaic.copy()
+
     feats = [
-        ndimage.uniform_filter(mosaic, window, mode="nearest"),
+        ndimage.uniform_filter(work, window, mode="nearest"),
         np.sqrt(
             np.clip(
-                ndimage.uniform_filter(mosaic * mosaic, window, mode="nearest")
-                - ndimage.uniform_filter(mosaic, window, mode="nearest") ** 2,
+                ndimage.uniform_filter(work * work, window, mode="nearest")
+                - ndimage.uniform_filter(work, window, mode="nearest") ** 2,
                 0.0,
                 None,
             )
         ),
-        _local_entropy(mosaic, window),
+        _local_entropy(work, window),
     ]
     if slope_grid is not None:
         slope_grid = np.asarray(slope_grid, dtype=float)
@@ -254,8 +261,31 @@ def classify_backscatter(
     sd[sd == 0] = 1.0
     Xs = (X - mu) / sd
 
-    km = KMeans(n_clusters=n_classes, n_init=10, random_state=int(seed))
-    labels = km.fit_predict(Xs).reshape(mosaic.shape)
+    # Over-cluster then merge: boundary-transition pixels (high texture
+    # variance between seabed types) would otherwise hijack a cluster.
+    n_over = min(n_classes + 2, 8)
+    km = KMeans(n_clusters=n_over, n_init=10, random_state=int(seed))
+    raw_labels = km.fit_predict(Xs)
+    centroids = km.cluster_centers_[:, 0]  # local-mean feature (standardised)
+    # greedily merge the closest pair of centroids until n_classes remain
+    groups = {i: [i] for i in range(n_over)}
+    while len(groups) > n_classes:
+        keys = sorted(groups, key=lambda k: np.mean(centroids[groups[k]]))
+        best, best_d = None, np.inf
+        for a, b in zip(keys[:-1], keys[1:]):
+            d = abs(
+                np.mean(centroids[groups[a]]) - np.mean(centroids[groups[b]])
+            )
+            if d < best_d:
+                best, best_d = (a, b), d
+        groups[best[0]].extend(groups.pop(best[1]))
+    remap = np.empty(n_over, dtype=int)
+    for new_idx, key in enumerate(
+        sorted(groups, key=lambda k: np.mean(centroids[groups[k]]))
+    ):
+        for old in groups[key]:
+            remap[old] = new_idx
+    labels = remap[raw_labels].reshape(mosaic.shape)
 
     # order clusters by mean backscatter intensity
     mean_intensity = np.array(

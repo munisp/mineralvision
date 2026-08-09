@@ -99,9 +99,10 @@ def test_feature_detection_finds_channel_and_pinnacle():
 def test_backscatter_classes_separate():
     rng = np.random.default_rng(SEED + 2)
     mos = np.zeros((GRID, GRID))
-    mos[:, :20] = 30 + 3 * rng.standard_normal((GRID, 20))    # fine sediment
-    mos[:, 20:40] = 60 + 6 * rng.standard_normal((GRID, 20))  # coarse
-    mos[:, 40:] = 100 + 8 * rng.standard_normal((GRID, 20))   # rock
+    # multiplicative speckle (physically realistic for sonar backscatter)
+    mos[:, :20] = 30 + 4 * rng.standard_normal((GRID, 20))    # fine sediment
+    mos[:, 20:40] = 60 + 8 * rng.standard_normal((GRID, 20))  # coarse
+    mos[:, 40:] = 100 + 13 * rng.standard_normal((GRID, 20))  # rock
     res = logic.classify_backscatter(mos, n_classes=3, window=9, seed=0)
     cm = res["class_map"]
     # classes ordered by intensity: col 10 low, col 50 high
