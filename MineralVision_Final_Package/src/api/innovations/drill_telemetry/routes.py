@@ -33,8 +33,8 @@ class AutoLogRequest(BaseModel):
     collar_depth: float = 0.0
     planned_total_depth: Optional[float] = None
     deviation_tolerance: float = Field(default=0.5, ge=0)
-    slack_factor: float = Field(default=0.5, gt=0)
-    threshold_factor: float = Field(default=4.0, gt=0)
+    threshold_factor: float = Field(default=2.0, gt=0)
+    min_segment: int = Field(default=8, ge=2)
 
 
 @router.post("/rigs/{rig_id}/telemetry", status_code=201)
@@ -90,8 +90,8 @@ def auto_log(rig_id: str, req: AutoLogRequest,
     try:
         intervals = logic.segment_intervals(
             depth, rop, torque, rpm, vibration,
-            slack_factor=req.slack_factor,
-            threshold_factor=req.threshold_factor)
+            threshold_factor=req.threshold_factor,
+            min_segment=req.min_segment)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

@@ -3,20 +3,26 @@ Rig telemetry auto-logging — pure logic.
 
 Regime segmentation
 -------------------
-Two-sided tabular CUSUM on the ROP series (ordered by measured depth),
-after Page (1954):
+CUSUM binary segmentation on the ROP series (ordered by measured depth),
+after Page (1954) and Scott & Knott (1974).  For a candidate segment the
+mean-centred cumulative sum
 
-    S+_i = max(0, S+_{i-1} + (x_i - mu - k))
-    S-_i = max(0, S-_{i-1} - (x_i - mu + k))
+    S_t = sum_{i=a..t} (x_i - mu_ab)
 
-with mu/sigma estimated over the submitted series, slack ``k =
-slack_factor * sigma`` and decision threshold ``h = threshold_factor *
-sigma``.  When either accumulator exceeds ``h`` a regime shift is declared;
-the change boundary is backtracked to the index where the winning
-accumulator last left zero (the classical CUSUM change-point estimate),
-then the accumulators are reset.  Each resulting interval is summarised
-(depth range, mean ROP/torque/RPM/vibration) and labelled slow/medium/fast
-by mean-ROP rank.
+peaks (in absolute value) at the most likely change point t*.  A split is
+declared when
+
+    max_t |S_t| > threshold_factor * sigma_ab * sqrt(n_ab)
+
+For white noise max_t|S_t| / (sigma*sqrt(n)) follows the Kolmogorov
+distribution, so the default ``threshold_factor = 2.0`` gives a ~0.3 %
+per-segment false-split probability, while a step of size delta still
+exceeds the threshold by an enormous margin (max|S| ~ delta*n/4).  The
+segment splits at
+t* + 1 and the procedure recurses on both sides (binary segmentation) until
+no significant change remains or segments fall below ``min_segment``.  Each
+resulting interval is summarised (depth range, mean ROP/torque/RPM/
+vibration) and labelled slow/medium/fast by mean-ROP rank.
 
 Collar alignment & deviation
 ----------------------------
@@ -36,43 +42,43 @@ import numpy as np
 
 def cusum_change_points(
     values: np.ndarray,
-    slack_factor: float = 0.5,
-    threshold_factor: float = 4.0,
+    threshold_factor: float = 2.0,
+    min_segment: int = 8,
 ) -> List[int]:
-    """Two-sided CUSUM change-point indices on a 1-D series.
+    """CUSUM binary-segmentation change-point indices on a 1-D series.
 
     Returns sorted boundary indices (0 < i < n): index i starts a new
     regime (the change occurred between i-1 and i).
     """
     x = np.asarray(values, dtype=float)
     n = len(x)
-    if n < 3:
-        return []
-    mu = float(x.mean())
-    sigma = float(x.std())
-    if sigma < 1e-12:
-        return []
-    k = slack_factor * sigma
-    h = threshold_factor * sigma
+    if min_segment < 2:
+        raise ValueError("min_segment must be >= 2")
 
     boundaries: List[int] = []
-    sp = sm = 0.0
-    last_zero_p = last_zero_m = 0
-    for i in range(n):
-        sp = max(0.0, sp + (x[i] - mu - k))
-        sm = max(0.0, sm - (x[i] - mu + k))
-        if sp == 0.0:
-            last_zero_p = i
-        if sm == 0.0:
-            last_zero_m = i
-        if sp > h or sm > h:
-            boundary = last_zero_p + 1 if sp > h else last_zero_m + 1
-            boundary = min(max(boundary, 1), n - 1)
-            if not boundaries or boundary > boundaries[-1]:
-                boundaries.append(boundary)
-            sp = sm = 0.0
-            last_zero_p = last_zero_m = i
-    return boundaries
+
+    def _segment(a: int, b: int) -> None:
+        # consider splits of x[a:b] (exclusive b)
+        m = b - a
+        if m < 2 * min_segment:
+            return
+        seg = x[a:b]
+        mu = seg.mean()
+        sigma = seg.std()
+        if sigma < 1e-12:
+            return
+        s = np.cumsum(seg - mu)
+        t_star = int(np.argmax(np.abs(s)))
+        if abs(s[t_star]) <= threshold_factor * sigma * np.sqrt(m):
+            return
+        boundary = a + t_star + 1
+        boundary = min(max(boundary, a + min_segment), b - min_segment)
+        boundaries.append(boundary)
+        _segment(a, boundary)
+        _segment(boundary, b)
+
+    _segment(0, n)
+    return sorted(boundaries)
 
 
 def segment_intervals(
@@ -81,8 +87,8 @@ def segment_intervals(
     torque: Optional[np.ndarray] = None,
     rpm: Optional[np.ndarray] = None,
     vibration: Optional[np.ndarray] = None,
-    slack_factor: float = 0.5,
-    threshold_factor: float = 4.0,
+    threshold_factor: float = 2.0,
+    min_segment: int = 8,
 ) -> List[Dict[str, Any]]:
     """Segment a drill trace into ROP regimes; returns the interval table."""
     depth = np.asarray(depth, dtype=float)
@@ -106,7 +112,7 @@ def segment_intervals(
     vibration = _opt(vibration)
 
     bounds = [0] + cusum_change_points(
-        rop, slack_factor, threshold_factor) + [n]
+        rop, threshold_factor, min_segment) + [n]
 
     intervals: List[Dict[str, Any]] = []
     for a, b in zip(bounds[:-1], bounds[1:]):
