@@ -1,0 +1,33 @@
+# Alembic migrations — MineralVision API
+
+Run all commands from `MineralVision_Final_Package/` (where `alembic.ini` lives).
+
+## Database URL resolution
+1. `DATABASE_URL` env var (production: `postgresql+psycopg2://user:pass@host:5432/mineralvision`)
+2. `sqlite:///./mineralvision.db` dev fallback (matches `src/api/database.py`)
+3. Tests/tools may override programmatically via `Config.set_main_option("sqlalchemy.url", ...)`.
+
+## Commands
+```bash
+# Apply all migrations
+DATABASE_URL=postgresql+psycopg2://user:pass@host:5432/mineralvision alembic upgrade head
+
+# Roll back one revision / roll back everything
+alembic downgrade -1
+alembic downgrade base
+
+# Current revision & history
+alembic current
+alembic history --verbose
+
+# Generate a new revision after changing models in src/api/database.py
+alembic revision --autogenerate -m "describe change"
+# ALWAYS review the generated file before committing.
+
+# Emit SQL without connecting (offline mode, for DBAs)
+alembic upgrade head --sql
+```
+
+Note: `src.api.database.init_db()` uses `Base.metadata.create_all`, which is a
+no-op on migrated databases but bypasses revision tracking on fresh ones. For
+migrated deployments prefer `alembic upgrade head` over `create_all`.
