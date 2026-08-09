@@ -32,9 +32,15 @@ export function resolveBaseUrl(baseUrl?: string): string {
   return base;
 }
 
-/** URL for the GeoJSON feature tiles used as MapLibre tile sources. */
-export function featureTileUrl(layer: GeoToolkitLayer, baseUrl?: string): string {
-  return `${resolveBaseUrl(baseUrl)}/innovations/geotoolkit/tiles/features/{z}/{x}/{y}?layer=${layer}`;
+/** URL for one concrete GeoJSON feature tile. */
+export function featureTileZxyUrl(
+  layer: GeoToolkitLayer,
+  z: number,
+  x: number,
+  y: number,
+  baseUrl?: string,
+): string {
+  return `${resolveBaseUrl(baseUrl)}/innovations/geotoolkit/tiles/features/${z}/${x}/${y}?layer=${layer}`;
 }
 
 /** Same URL with concrete z/x/y — used for availability probes. */
