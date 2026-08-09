@@ -23,7 +23,8 @@ from api.innovations.core_scan import logic, router
 
 TRAY_BGR = (50, 50, 50)        # dark tray background
 CORE_RGB = (190, 165, 130)     # bright tan core
-FRACTURE_RGB = (20, 20, 20)    # dark transverse fracture line
+FRACTURE_RGB = (90, 90, 90)    # dark transverse fracture line (dimmer than
+                               # core, brighter than empty tray)
 
 N_ROWS, N_COLS = 400, 120
 # core strip occupies columns 20..100

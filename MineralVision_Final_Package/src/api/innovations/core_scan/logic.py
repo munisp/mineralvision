@@ -252,7 +252,7 @@ def spectral_indices(bands: Sequence[float],
         num_b, den_b = bm[index]
         if num_b > cube.shape[0] or den_b > cube.shape[0]:
             continue  # sensor lacks the bands for this index
-        out[index] = float(hs_logic.compute_index(cube, index, bm)[0, 0, 0])
+        out[index] = float(hs_logic.compute_index(cube, index, bm)[0, 0])
     return out
 
 
@@ -486,13 +486,17 @@ def core_quality(image: np.ndarray,
                  ) -> Dict[str, Any]:
     """Recovery % and an RQD-style fracture estimate from the core photo.
 
-    * Row brightness profile over each registered box span.
-    * Core-present rows are separated from tray-background rows by an Otsu
-      threshold on row brightness (overridable) — real segmentation, so
-      missing-core gaps in the tray are detected as absent rows.
+    * Core columns are located first: columns whose mean brightness sits
+      clearly above the tray-background level (the tray dominates the dim
+      end of the column-mean distribution).
+    * Row brightness is then measured over the core columns only, per
+      registered box span.  Background and core levels are taken from the
+      brightness percentiles; core-present rows sit above
+      ``bg + 0.25 * (core - bg)`` (overridable via ``present_threshold``),
+      so missing-core gaps are detected as absent rows.
     * Fractures are transverse dark lines: rows *present* as core but darker
-      than the midpoint between the background threshold and the core level;
-      consecutive dark rows merge into one fracture event.
+      than ``bg + 0.6 * (core - bg)`` — darker than sound core, lighter than
+      empty tray; consecutive dark rows merge into one fracture event.
     * Pieces = runs of present, non-fracture rows; the RQD-style value is the
       fraction of recovered length in pieces longer than ``rq_piece_m``
       (default 0.1 m, per the ISRM RQD convention).
@@ -507,15 +511,28 @@ def core_quality(image: np.ndarray,
         rows.extend(range(int(b["row_start"]), int(b["row_end"])))
     if not rows:
         raise ValueError("boxes span no image rows")
-    brightness = gray[rows].mean(axis=1)
 
-    thr = (otsu_threshold(brightness) if present_threshold is None
-           else float(present_threshold))
+    # locate core-strip columns (tray columns cluster at the dim end)
+    col_mean = gray[rows].mean(axis=0)
+    col_bg = float(np.percentile(col_mean, 25))
+    core_cols = np.where(
+        col_mean > col_bg + 0.2 * (float(col_mean.max()) - col_bg))[0]
+    if core_cols.size == 0:
+        core_cols = np.arange(gray.shape[1])
+
+    brightness = gray[np.ix_(rows, core_cols)].mean(axis=1)
+    bg_level = float(np.percentile(brightness, 10))
+    hi_level = float(np.percentile(brightness, 90))
+    if hi_level - bg_level < EPS:
+        raise ValueError("image lacks core/background contrast")
+
+    thr = (bg_level + 0.25 * (hi_level - bg_level)
+           if present_threshold is None else float(present_threshold))
     present = brightness > thr
 
     core_level = (float(np.median(brightness[present])) if present.any()
-                  else float(brightness.max()))
-    dark_cut = (thr + core_level) / 2.0
+                  else hi_level)
+    dark_cut = bg_level + 0.6 * (core_level - bg_level)
     fracture = present & (brightness < dark_cut)
 
     # merge consecutive fracture rows into single fracture events
