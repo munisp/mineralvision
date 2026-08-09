@@ -277,6 +277,10 @@ from .innovations.audit_collaboration import router as audit_collaboration_route
 from .innovations.integration_hub import router as integration_hub_router
 from .innovations.commodity_discovery import router as commodity_discovery_router
 from .innovations.marine_sonar import router as marine_sonar_router
+from .innovations.geoai import router as geoai_router
+from .innovations.geodb import router as geodb_router
+from .innovations.geotoolkit import router as geotoolkit_router
+from .innovations.geotoolkit_ext import router as geotoolkit_ext_router
 
 for _innovation_router in (
     jorc_reporter_router,
@@ -301,6 +305,10 @@ for _innovation_router in (
     integration_hub_router,
     commodity_discovery_router,
     marine_sonar_router,
+    geoai_router,
+    geodb_router,
+    geotoolkit_router,
+    geotoolkit_ext_router,
 ):
     app.include_router(_innovation_router)
 
