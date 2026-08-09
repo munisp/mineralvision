@@ -957,7 +957,8 @@ class LIMSIngestionPipeline:
     
     def to_soil_samples(self) -> List[Dict[str, Any]]:
         """
-        Convert to MineralVision SoilSample format for agricultural analysis.
+        Convert to MineralVision soil geochemistry sample format for
+        mineral exploration analysis.
         """
         soil_samples = []
         
@@ -965,40 +966,43 @@ class LIMSIngestionPipeline:
             if sample.sample_type != SampleType.ROUTINE:
                 continue
             
-            # Map LIMS results to soil sample fields
+            # Map LIMS results to soil geochemistry sample fields
             soil_sample = {
                 "sample_id": sample.sample_id,
                 "x": sample.x or 0.0,
                 "y": sample.y or 0.0,
                 "sampling_date": sample.received_date or datetime.now(),
                 
-                # Chemical properties
+                # Soil properties relevant to geochemical interpretation
                 "ph": sample.get_value("pH"),
-                "ec_dsm": sample.get_value("EC"),
-                "cec_cmol_kg": sample.get_value("CEC"),
-                "organic_matter_pct": sample.get_value("OM") or sample.get_value("OC") * 1.724,
+                "organic_carbon_pct": sample.get_value("OC"),
                 
-                # Macronutrients
-                "nitrogen_pct": sample.get_value("N") / 10000 if sample.get_value("N") > 100 else sample.get_value("N"),
-                "phosphorus_ppm": sample.get_value("P"),
-                "potassium_ppm": sample.get_value("K"),
+                # Ore elements
+                "copper_ppm": sample.get_value("Cu"),
+                "lead_ppm": sample.get_value("Pb"),
+                "zinc_ppm": sample.get_value("Zn"),
+                "gold_ppb": sample.get_value("Au"),
+                "silver_ppm": sample.get_value("Ag"),
+                "molybdenum_ppm": sample.get_value("Mo"),
+                "nickel_ppm": sample.get_value("Ni"),
+                "cobalt_ppm": sample.get_value("Co"),
+                "uranium_ppm": sample.get_value("U"),
                 
-                # Secondary nutrients
-                "calcium_ppm": sample.get_value("Ca"),
-                "magnesium_ppm": sample.get_value("Mg"),
-                "sulfur_ppm": sample.get_value("S"),
+                # Pathfinder elements
+                "arsenic_ppm": sample.get_value("As"),
+                "antimony_ppm": sample.get_value("Sb"),
+                "bismuth_ppm": sample.get_value("Bi"),
+                "tungsten_ppm": sample.get_value("W"),
+                "tin_ppm": sample.get_value("Sn"),
                 
-                # Micronutrients
+                # Major elements
                 "iron_ppm": sample.get_value("Fe"),
                 "manganese_ppm": sample.get_value("Mn"),
-                "zinc_ppm": sample.get_value("Zn"),
-                "copper_ppm": sample.get_value("Cu"),
-                "boron_ppm": sample.get_value("B"),
-                "molybdenum_ppm": sample.get_value("Mo"),
-                
-                # Problematic elements
                 "aluminum_ppm": sample.get_value("Al"),
+                "calcium_ppm": sample.get_value("Ca"),
+                "magnesium_ppm": sample.get_value("Mg"),
                 "sodium_ppm": sample.get_value("Na"),
+                "potassium_ppm": sample.get_value("K"),
                 
                 "metadata": {
                     "source": "lims",

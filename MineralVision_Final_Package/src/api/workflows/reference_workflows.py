@@ -5,7 +5,6 @@ This module provides curated, reproducible workflows for:
 - Gold exploration (orogenic, epithermal, intrusion-related, IOCG)
 - Lithium exploration (pegmatite, brine, clay)
 - Rare Earth Elements (carbonatite, ion-adsorption, placer)
-- Agricultural soil suitability (palm, cocoa, ginger)
 
 Each workflow includes:
 - Pinned configurations for reproducibility
@@ -45,7 +44,6 @@ class CommodityType(Enum):
     GOLD = "gold"
     LITHIUM = "lithium"
     REE = "rare_earth_elements"
-    SOIL_AGRI = "agricultural_soil"
 
 
 class DepositModel(Enum):
@@ -65,10 +63,6 @@ class DepositModel(Enum):
     CARBONATITE = "carbonatite"
     ION_ADSORPTION = "ion_adsorption"
     PLACER_REE = "placer_ree"
-    # Agriculture
-    PALM_OIL = "palm_oil"
-    COCOA = "cocoa"
-    GINGER = "ginger"
 
 
 @dataclass
@@ -252,7 +246,8 @@ class IngestStage(WorkflowStageExecutor):
         return {'n_polygons': 50, 'units': ['granite', 'schist', 'gneiss'], 'crs': 'EPSG:4326'}
     
     def _ingest_soil(self, input_data: Dict) -> Dict:
-        return {'n_samples': 200, 'parameters': ['pH', 'N', 'P', 'K', 'organic_matter'], 'crs': 'EPSG:4326'}
+        # Soil geochemistry sampling (mineral exploration)
+        return {'n_samples': 200, 'parameters': ['Au', 'Cu', 'Pb', 'Zn', 'Mo'], 'crs': 'EPSG:4326'}
 
 
 class QCStage(WorkflowStageExecutor):
@@ -319,8 +314,6 @@ class ProcessingStage(WorkflowStageExecutor):
             outputs = self._process_lithium(inputs, config)
         elif config.commodity == CommodityType.REE:
             outputs = self._process_ree(inputs, config)
-        elif config.commodity == CommodityType.SOIL_AGRI:
-            outputs = self._process_soil(inputs, config)
             
         metrics['grids_generated'] = len(outputs.get('grids', []))
         metrics['derivatives_computed'] = len(outputs.get('derivatives', []))
@@ -357,13 +350,6 @@ class ProcessingStage(WorkflowStageExecutor):
             'derivatives': ['th_u_ratio', 'carbonatite_index'],
             'anomalies': {'radiometric': 10, 'geochemical': 15}
         }
-    
-    def _process_soil(self, inputs: Dict, config: WorkflowConfig) -> Dict:
-        return {
-            'grids': ['ph', 'nitrogen', 'phosphorus', 'potassium', 'organic_matter'],
-            'derivatives': ['nutrient_index', 'drainage_class', 'texture_class'],
-            'suitability_scores': {'palm': 0.85, 'cocoa': 0.72, 'ginger': 0.68}
-        }
 
 
 class InterpretationStage(WorkflowStageExecutor):
@@ -379,7 +365,7 @@ class InterpretationStage(WorkflowStageExecutor):
         if config.commodity in [CommodityType.GOLD, CommodityType.LITHIUM, CommodityType.REE]:
             outputs = self._interpret_mineral(inputs, config)
         else:
-            outputs = self._interpret_soil(inputs, config)
+            raise ValueError(f"Unsupported commodity type: {config.commodity}")
             
         metrics['features_extracted'] = outputs.get('n_features', 0)
         metrics['model_accuracy'] = outputs.get('cv_score', 0)
@@ -407,20 +393,6 @@ class InterpretationStage(WorkflowStageExecutor):
                 'structure_distance': 0.12
             },
             'prospectivity_grid': 'prospectivity_v1.tif',
-            'uncertainty_grid': 'uncertainty_v1.tif'
-        }
-    
-    def _interpret_soil(self, inputs: Dict, config: WorkflowConfig) -> Dict:
-        return {
-            'n_features': 25,
-            'cv_score': 0.78,
-            'feature_importance': {
-                'ph': 0.20,
-                'drainage': 0.18,
-                'organic_matter': 0.15,
-                'slope': 0.12
-            },
-            'suitability_grid': 'suitability_v1.tif',
             'uncertainty_grid': 'uncertainty_v1.tif'
         }
 
@@ -669,45 +641,6 @@ def create_ree_carbonatite_workflow() -> ReferenceWorkflow:
         deposit_model=DepositModel.CARBONATITE,
         version="1.0.0",
         grid_cell_size=50.0,
-        confidence_threshold=0.70
-    )
-    return ReferenceWorkflow(config)
-
-
-def create_soil_palm_workflow() -> ReferenceWorkflow:
-    """Create palm oil soil suitability workflow."""
-    config = WorkflowConfig(
-        workflow_id=f"soil_palm_{uuid.uuid4().hex[:8]}",
-        commodity=CommodityType.SOIL_AGRI,
-        deposit_model=DepositModel.PALM_OIL,
-        version="1.0.0",
-        grid_cell_size=30.0,
-        confidence_threshold=0.75
-    )
-    return ReferenceWorkflow(config)
-
-
-def create_soil_cocoa_workflow() -> ReferenceWorkflow:
-    """Create cocoa soil suitability workflow."""
-    config = WorkflowConfig(
-        workflow_id=f"soil_cocoa_{uuid.uuid4().hex[:8]}",
-        commodity=CommodityType.SOIL_AGRI,
-        deposit_model=DepositModel.COCOA,
-        version="1.0.0",
-        grid_cell_size=30.0,
-        confidence_threshold=0.75
-    )
-    return ReferenceWorkflow(config)
-
-
-def create_soil_ginger_workflow() -> ReferenceWorkflow:
-    """Create ginger soil suitability workflow."""
-    config = WorkflowConfig(
-        workflow_id=f"soil_ginger_{uuid.uuid4().hex[:8]}",
-        commodity=CommodityType.SOIL_AGRI,
-        deposit_model=DepositModel.GINGER,
-        version="1.0.0",
-        grid_cell_size=25.0,
         confidence_threshold=0.70
     )
     return ReferenceWorkflow(config)

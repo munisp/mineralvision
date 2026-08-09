@@ -974,46 +974,6 @@ class JourneyRegistry:
             ),
             
             JourneyManifest(
-                id="journey-020",
-                name="Soil Suitability Assessment",
-                description="Assess soil suitability for agricultural applications",
-                category="ml_predictions",
-                ui_entry_point="/ai-insights",
-                required_permissions=["predictive_modeling:execute"],
-                estimated_duration_minutes=30,
-                tags=["soil", "agriculture", "suitability"],
-                steps=[
-                    JourneyStep(
-                        id="step-020-1",
-                        name="Load Soil Data",
-                        step_type=StepType.API_CALL,
-                        endpoint="/api/samples",
-                        method="GET",
-                    ),
-                    JourneyStep(
-                        id="step-020-2",
-                        name="Run Soil Suitability Model",
-                        step_type=StepType.ML_INFERENCE,
-                        module="src.api.ml.soil_suitability",
-                        kafka_topic="mineralvision.ml.soil.inference.completed",
-                    ),
-                    JourneyStep(
-                        id="step-020-3",
-                        name="Run Advanced Assessment",
-                        step_type=StepType.ML_INFERENCE,
-                        module="src.api.ml.advanced_soil_assessment",
-                    ),
-                    JourneyStep(
-                        id="step-020-4",
-                        name="Generate Recommendations",
-                        step_type=StepType.REPORT_GENERATION,
-                        endpoint="/api/reports",
-                        method="POST",
-                    ),
-                ],
-            ),
-            
-            JourneyManifest(
                 id="journey-021",
                 name="Uncertainty Quantification",
                 description="Quantify prediction uncertainty and generate confidence layers",

@@ -5,7 +5,6 @@ This module provides end-to-end reference workflows:
 - Gold exploration workflows (orogenic, epithermal, intrusion-related, IOCG)
 - Lithium exploration workflows (pegmatite, brine, clay-hosted)
 - REE exploration workflows (carbonatite, ion-adsorption)
-- Agricultural soil assessment workflows (palm, cocoa, ginger)
 """
 
 from .reference_workflows import (
@@ -28,9 +27,6 @@ from .reference_workflows import (
     create_lithium_pegmatite_workflow,
     create_lithium_brine_workflow,
     create_ree_carbonatite_workflow,
-    create_soil_palm_workflow,
-    create_soil_cocoa_workflow,
-    create_soil_ginger_workflow,
 )
 
 __all__ = [
@@ -62,7 +58,4 @@ __all__ = [
     'create_lithium_pegmatite_workflow',
     'create_lithium_brine_workflow',
     'create_ree_carbonatite_workflow',
-    'create_soil_palm_workflow',
-    'create_soil_cocoa_workflow',
-    'create_soil_ginger_workflow',
 ]
