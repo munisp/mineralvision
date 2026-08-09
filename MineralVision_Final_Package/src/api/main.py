@@ -283,6 +283,7 @@ from .innovations.geotoolkit import router as geotoolkit_router
 from .innovations.geotoolkit_ext import router as geotoolkit_ext_router
 from .innovations.geomodel import router as geomodel_router
 from .innovations.drill_planner import router as drill_planner_router
+from .innovations.core_scan import router as core_scan_router
 
 for _innovation_router in (
     jorc_reporter_router,
@@ -313,6 +314,7 @@ for _innovation_router in (
     geotoolkit_ext_router,
     geomodel_router,
     drill_planner_router,
+    core_scan_router,
 ):
     app.include_router(_innovation_router)
 
