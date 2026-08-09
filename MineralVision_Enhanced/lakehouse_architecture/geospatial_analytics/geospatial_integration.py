@@ -214,33 +214,49 @@ class GeospatialAnalytics:
             self.logger.error(f"Failed to create spatial index: {str(e)}")
             return None
     
-    def transform_crs(self, data: Any, geometry_column: str, source_crs: Optional[str] = None,
+    def transform_crs(self, data: Any, geometry_column: Optional[str] = None,
+                     source_crs: Optional[str] = None,
                      target_crs: Optional[str] = None) -> Any:
         """
         Transform geometries from one coordinate reference system to another.
-        
+
         Args:
-            data: Data containing geometries (GeoDataFrame or DataFrame)
-            geometry_column: Geometry column to transform
+            data: Data containing geometries (GeoDataFrame, DataFrame, or a list
+                of (x, y) coordinate tuples)
+            geometry_column: Geometry column to transform (optional; not needed
+                for raw coordinate sequences)
             source_crs: Source CRS (defaults to default_crs if None)
             target_crs: Target CRS (defaults to default_crs if None)
-            
+
         Returns:
             Any: Data with transformed geometries
         """
         if source_crs is None:
             source_crs = self.config.default_crs
-        
+
         if target_crs is None:
             target_crs = self.config.default_crs
-        
+
         if source_crs == target_crs:
             self.logger.info(f"Source and target CRS are the same ({source_crs}), no transformation needed")
             return data
-        
+
         self.logger.info(f"Transforming geometries from {source_crs} to {target_crs}")
-        
+
         try:
+            # Raw coordinate sequences (e.g. [(x, y), ...]) need no geometry column
+            if geometry_column is None and isinstance(data, (list, tuple, np.ndarray)):
+                if not PYPROJ_AVAILABLE:
+                    self.logger.warning("pyproj not available, returning original coordinates")
+                    return data
+                cache_key = (source_crs, target_crs)
+                if cache_key not in self._transformer_cache:
+                    self._transformer_cache[cache_key] = Transformer.from_crs(source_crs, target_crs, always_xy=True)
+                transformer = self._transformer_cache[cache_key]
+                transformed = [transformer.transform(x, y) for x, y in data]
+                self.logger.info(f"Transformed {len(transformed)} coordinates using pyproj")
+                return transformed
+
             if GEOPANDAS_AVAILABLE and hasattr(data, 'to_crs'):
                 result = data.to_crs(target_crs)
                 self.logger.info("Successfully transformed geometries using geopandas")
@@ -398,21 +414,36 @@ class GeospatialAnalytics:
             self.logger.error(f"Failed to perform spatial join: {str(e)}")
             return left_data
     
-    def extract_mineral_features(self, data: Any, spectral_columns: List[str],
-                               mineral_types: List[str]) -> Any:
+    def extract_mineral_features(self, data: Any, spectral_columns: Optional[List[str]] = None,
+                               mineral_types: Optional[List[str]] = None) -> Any:
         """
         Extract mineral features from spectral data using spectral analysis.
-        
+
         Args:
-            data: Spectral data (DataFrame with spectral band columns)
-            spectral_columns: Columns containing spectral data
-            mineral_types: Types of minerals to extract features for
-            
+            data: Spectral data (DataFrame or dict convertible to a DataFrame)
+            spectral_columns: Columns containing spectral data (defaults to all
+                numeric columns if None)
+            mineral_types: Types of minerals to extract features for (defaults
+                to a standard exploration mineral set if None)
+
         Returns:
             Any: Data with extracted mineral features
         """
+        if isinstance(data, dict) and not isinstance(data, pd.DataFrame):
+            try:
+                data = pd.DataFrame(data)
+            except Exception:
+                pass
+
+        if isinstance(data, pd.DataFrame):
+            if spectral_columns is None:
+                spectral_columns = [c for c in data.columns
+                                    if pd.api.types.is_numeric_dtype(data[c])]
+        if mineral_types is None:
+            mineral_types = ["iron_oxide", "clay", "carbonate", "silica"]
+
         self.logger.info(f"Extracting features for minerals: {mineral_types}")
-        
+
         try:
             if isinstance(data, pd.DataFrame):
                 result = data.copy()
@@ -530,23 +561,46 @@ class GeospatialAnalytics:
             self.logger.error(f"Failed to detect geological structures: {str(e)}")
             return data
     
-    def calculate_mineral_potential(self, data: Any, feature_columns: List[str],
+    def calculate_mineral_potential(self, data: Any, feature_columns: Optional[List[str]] = None,
                                   weights: Optional[Dict[str, float]] = None) -> Any:
         """
         Calculate mineral potential from multiple features using weighted scoring.
-        
+
         Args:
-            data: Data containing feature columns (DataFrame)
+            data: Data containing features (DataFrame, dict, or numpy array)
             feature_columns: Columns containing features for potential calculation
+                (defaults to all numeric columns if None)
             weights: Weights for each feature (defaults to equal weights if None)
-            
+
         Returns:
-            Any: Data with calculated mineral potential score
+            Any: Data with calculated mineral potential score. For numpy array
+                input, returns a normalized potential surface with the same shape.
         """
         self.logger.info("Calculating mineral potential")
-        
+
+        if isinstance(data, dict) and not isinstance(data, pd.DataFrame):
+            try:
+                data = pd.DataFrame(data)
+            except Exception:
+                pass
+
         try:
+            if isinstance(data, np.ndarray):
+                # Treat the array as a potential surface: min-max normalize to [0, 1]
+                values = data.astype(float)
+                v_min = np.nanmin(values)
+                v_max = np.nanmax(values)
+                if v_max > v_min:
+                    potential = (values - v_min) / (v_max - v_min)
+                else:
+                    potential = np.zeros_like(values)
+                potential = np.nan_to_num(potential, nan=0.0)
+                self.logger.info(f"Calculated mineral potential surface with shape {potential.shape}")
+                return potential
             if isinstance(data, pd.DataFrame):
+                if feature_columns is None:
+                    feature_columns = [c for c in data.columns
+                                       if pd.api.types.is_numeric_dtype(data[c])]
                 result = data.copy()
                 available_cols = [c for c in feature_columns if c in data.columns]
                 
