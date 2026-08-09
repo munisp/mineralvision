@@ -1,4 +1,4 @@
-# MineralVision — 20 Premiere Innovations
+# MineralVision — 22 Premiere Innovations
 
 All 20 features are implemented as production modules under `MineralVision_Final_Package/src/api/innovations/`,
 wired into the canonical API (`src.api.main:app`) under `/innovations/<name>`, and covered by deterministic
@@ -97,6 +97,16 @@ project settings with snapshot revert.
 ### 20. Integration Hub (`/innovations/integration_hub`)
 Webhook registry with HMAC-SHA256 signed deliveries (`X-MV-Signature`), exponential-backoff retries and
 delivery logs, plus scoped API keys (bcrypt-hashed, scope-enforced) for external integrations.
+### 21. Commodity Discovery (`/innovations/commodity-discovery`)
+API gateway to the platform's gold and lithium exploration engines: pathfinder-element scoring
+(As-Sb-Te-W-Bi for gold; Li-Rb-Cs-Ta-Sn for LCT pegmatites), K/Rb fractionation and Mg/Li brine
+chemistry, alteration indices, regolith models, and an end-to-end discovery workflow endpoint.
+
+### 22. Marine Sonar (`/innovations/marine-sonar`)
+Offshore mineral exploration from sonar data: multibeam bathymetry gridding with spike filtering,
+terrain attributes (slope, rugosity, BPI, hillshade), dB-space backscatter texture classification
+(fine/coarse sediment, rock), feature detection (channels, ridges, pinnacles), and composite target
+scoring against five marine deposit models (placer gold, marine diamond, tin placer, SMS, polymetallic nodules).
 
 ---
 

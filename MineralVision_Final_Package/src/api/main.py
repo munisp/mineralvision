@@ -275,6 +275,8 @@ from .innovations.doc_intelligence import router as doc_intelligence_router
 from .innovations.field_sync import router as field_sync_router
 from .innovations.audit_collaboration import router as audit_collaboration_router
 from .innovations.integration_hub import router as integration_hub_router
+from .innovations.commodity_discovery import router as commodity_discovery_router
+from .innovations.marine_sonar import router as marine_sonar_router
 
 for _innovation_router in (
     jorc_reporter_router,
@@ -297,6 +299,8 @@ for _innovation_router in (
     field_sync_router,
     audit_collaboration_router,
     integration_hub_router,
+    commodity_discovery_router,
+    marine_sonar_router,
 ):
     app.include_router(_innovation_router)
 

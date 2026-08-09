@@ -72,9 +72,24 @@ from .streaming_fusion import (
     create_sensor_message
 )
 
-from .hyperspectral_adapter import HyperspectralAdapter
-from .lidar_adapter import LiDARAdapter
-from .magnetometry_adapter import MagnetometryAdapter
+# Optional-backend adapters: import guarded so the package loads even when
+# exotic system libraries (spectral / laspy / pdal) are unavailable.
+try:
+    from .hyperspectral_adapter import HyperspectralDataAdapter
+    HyperspectralAdapter = HyperspectralDataAdapter  # back-compat alias
+except ImportError:  # optional 'spectral' backend missing
+    HyperspectralDataAdapter = None
+    HyperspectralAdapter = None
+try:
+    from .lidar_adapter import LiDARDataAdapter
+    LiDARAdapter = LiDARDataAdapter  # back-compat alias
+    LidarDataAdapter = LiDARDataAdapter
+except ImportError:  # optional 'laspy'/'pdal' backend missing
+    LiDARDataAdapter = None
+    LiDARAdapter = None
+    LidarDataAdapter = None
+from .magnetometry_adapter import MagnetometryDataAdapter
+MagnetometryAdapter = MagnetometryDataAdapter  # back-compat alias
 
 # New sensor processing pipelines
 from .magnetometry_pipeline import (
