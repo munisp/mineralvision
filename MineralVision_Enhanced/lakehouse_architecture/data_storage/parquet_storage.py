@@ -61,21 +61,30 @@ class ParquetStorage:
         self.logger = logging.getLogger("ParquetStorage")
         self.logger.info("Initialized Parquet storage utility")
     
-    def write_parquet(self, data: Any, file_path: str, partition_by: Optional[List[str]] = None,
-                     schema: Optional[Dict] = None) -> bool:
+    def write_parquet(self, file_path: str, data: Any, partition_by: Optional[List[str]] = None,
+                     schema: Optional[Dict] = None, compression: Optional[str] = None) -> bool:
         """
         Write data to a Parquet file with optimized settings.
-        
+
         Args:
-            data: Data to write (DataFrame, PyArrow Table, dict, or list of dicts)
             file_path: Path to write the Parquet file to
+            data: Data to write (DataFrame, PyArrow Table, dict, or list of dicts)
             partition_by: Columns to partition the data by
             schema: Schema to use for the Parquet file
-            
+            compression: Compression codec (defaults to config setting)
+
         Returns:
             bool: True if data was written successfully
         """
-        full_path = os.path.join(self.config.base_path, file_path)
+        # Backward compatibility: a dict passed as the third positional argument
+        # is a schema, not a partition column list.
+        if isinstance(partition_by, dict) and schema is None:
+            schema = partition_by
+            partition_by = None
+
+        if compression is None:
+            compression = self.config.compression
+        full_path = file_path if os.path.isabs(file_path) else os.path.join(self.config.base_path, file_path)
         self.logger.info(f"Writing Parquet file to {full_path}")
         
         try:
@@ -96,9 +105,9 @@ class ParquetStorage:
                 raise ValueError(f"Unsupported data type: {type(data)}")
             
             if partition_by:
-                pq.write_to_dataset(table, root_path=full_path, partition_cols=partition_by, compression=self.config.compression, use_dictionary=self.config.enable_dictionary, write_statistics=self.config.enable_statistics)
+                pq.write_to_dataset(table, root_path=full_path, partition_cols=partition_by, compression=compression, use_dictionary=self.config.enable_dictionary, write_statistics=self.config.enable_statistics)
             else:
-                pq.write_table(table, full_path, compression=self.config.compression, use_dictionary=self.config.enable_dictionary, write_statistics=self.config.enable_statistics, row_group_size=self.config.row_group_size)
+                pq.write_table(table, full_path, compression=compression, use_dictionary=self.config.enable_dictionary, write_statistics=self.config.enable_statistics, row_group_size=self.config.row_group_size)
             
             self.logger.info(f"Successfully wrote {len(table)} rows to {full_path}")
             return True
@@ -106,9 +115,10 @@ class ParquetStorage:
             self.logger.error(f"Failed to write Parquet file: {str(e)}")
             raise
     
-    def write_file(self, data: Any, file_path: str, partition_by: Optional[List[str]] = None, schema: Optional[Dict] = None) -> bool:
+    def write_file(self, file_path: str, data: Any, partition_by: Optional[List[str]] = None,
+                  schema: Optional[Dict] = None, compression: Optional[str] = None) -> bool:
         """Alias for write_parquet for backward compatibility with tests."""
-        return self.write_parquet(data, file_path, partition_by, schema)
+        return self.write_parquet(file_path, data, partition_by, schema, compression)
     
     def read_parquet(self, file_path: str, columns: Optional[List[str]] = None,
                     filters: Optional[List] = None) -> pd.DataFrame:
@@ -189,7 +199,7 @@ class ParquetStorage:
                 self.logger.warning(f"Unknown format {source_format}, attempting to read as CSV")
                 df = pd.read_csv(full_source_path)
             
-            return self.write_parquet(df, target_path, partition_by)
+            return self.write_parquet(target_path, df, partition_by)
         except Exception as e:
             self.logger.error(f"Failed to convert {source_format} to Parquet: {str(e)}")
             raise
@@ -282,6 +292,27 @@ class ParquetStorage:
             self.logger.error(f"Failed to get Parquet metadata: {str(e)}")
             return {}
     
+    def get_statistics(self, file_path: str) -> Dict:
+        """
+        Get statistics for a Parquet file.
+
+        Convenience wrapper around get_parquet_metadata that guarantees
+        row-count keys are present.
+
+        Args:
+            file_path: Path to the Parquet file
+
+        Returns:
+            Dict: Statistics including "num_rows" and "row_count"
+        """
+        metadata = self.get_parquet_metadata(file_path)
+        if not metadata:
+            return {}
+
+        stats = dict(metadata)
+        stats["row_count"] = metadata.get("num_rows", 0)
+        return stats
+
     def merge_parquet_files(self, source_paths: List[str], target_path: str,
                            partition_by: Optional[List[str]] = None) -> bool:
         """
