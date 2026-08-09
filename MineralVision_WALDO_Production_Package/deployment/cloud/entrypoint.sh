@@ -6,6 +6,8 @@ export MODEL_PRECISION=${MODEL_PRECISION:-"fp16"}
 export BATCH_SIZE=${BATCH_SIZE:-4}
 export DATABASE_URI=${DATABASE_URI:-"sqlite:///app/data/waldo_detections.db"}
 
-# Start the WALDO detection service
+# Start the WALDO detection service (Flask API in src/api/server.py)
 echo "Starting WALDO detection service with precision: $MODEL_PRECISION, batch size: $BATCH_SIZE"
-python3 -m src.waldo_integration.server
+export PYTHONPATH=/app/src
+export PORT=${PORT:-8000}
+exec python3 -m api.server

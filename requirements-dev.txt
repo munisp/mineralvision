@@ -1,0 +1,18 @@
+# MineralVision Platform - Development Dependencies
+# Install with: pip install -r requirements-dev.txt
+-r requirements.txt
+
+# Testing
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+
+# Linting & formatting
+ruff==0.16.2
+black==26.5.1
+mypy==2.3.0
+
+# Load testing
+# NOTE: k6 is a Go binary, not a pip package.
+# Install separately: https://grafana.com/docs/k6/latest/set-up/install-k6/
+locust==2.46.3

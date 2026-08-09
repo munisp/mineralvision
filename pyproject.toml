@@ -8,7 +8,7 @@ version = "1.0.0"
 description = "AI-Powered Mineral Exploration Platform"
 readme = "README.md"
 license = {text = "Proprietary"}
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [
     {name = "MineralVision Team"}
 ]
@@ -16,57 +16,70 @@ keywords = ["mineral", "exploration", "geospatial", "machine-learning", "digital
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
-    "fastapi>=0.104.0",
-    "uvicorn[standard]>=0.24.0",
-    "pydantic>=2.5.0",
-    "sqlalchemy>=2.0.0",
-    "numpy>=1.24.0",
-    "pandas>=2.0.0",
-    "scipy>=1.11.0",
-    "scikit-learn>=1.3.0",
-    "geopandas>=0.14.0",
-    "shapely>=2.0.0",
-    "httpx>=0.25.0",
-    "python-dotenv>=1.0.0",
-    "pyyaml>=6.0.1",
-    "structlog>=23.2.0",
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.1",
+    "pydantic==2.13.4",
+    "python-multipart==0.0.32",
+    "sqlalchemy==2.0.51",
+    "alembic==1.19.1",
+    "psycopg2-binary==2.9.12",
+    "PyJWT==2.13.0",
+    "bcrypt==5.0.0",
+    "numpy==2.5.1",
+    "pandas==2.3.3",
+    "scipy==1.18.0",
+    "scikit-learn==1.9.0",
+    "geopandas==1.1.4",
+    "shapely==2.1.2",
+    "pyproj==3.7.2",
+    "rasterio==1.5.1",
+    "xarray==2026.7.0",
+    "matplotlib==3.11.1",
+    "plotly==6.9.0",
+    "pyarrow==25.0.0",
+    "deltalake==1.6.2",
+    "redis==8.1.0",
+    "aiokafka==0.14.0",
+    "prometheus-client==0.26.0",
+    "structlog==26.1.0",
+    "boto3==1.43.67",
+    "httpx==0.28.1",
+    "aiohttp==3.14.3",
+    "requests==2.34.2",
+    "laspy==2.7.0",
+    "h5py==3.16.0",
+    "pyvista==0.48.4",
+    "opencv-python-headless==5.0.0.93",
+    "pillow==12.3.0",
+    "optuna==4.9.0",
+    "mlflow==3.15.1",
+    "python-dotenv==1.2.2",
+    "pyyaml==6.0.3",
+    "tenacity==9.1.4",
 ]
 
 [project.optional-dependencies]
 ml = [
-    "torch>=2.0.0",
-    "pytorch-lightning>=2.1.0",
-    "mlflow>=2.8.0",
-    "optuna>=3.4.0",
-    "ultralytics>=8.3.0",  # YOLO11 support
-]
-geo = [
-    "rasterio>=1.3.0",
-    "pyproj>=3.6.0",
-    "xarray>=2023.10.0",
-    "laspy>=2.5.0",
-]
-viz = [
-    "matplotlib>=3.8.0",
-    "plotly>=5.18.0",
-    "pyvista>=0.42.0",
+    "torch==2.13.0",
+    "ultralytics==8.4.116",
+    "pytorch-lightning==2.6.5",
+    "transformers==5.14.1",
 ]
 dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.1.0",
-    "black>=23.11.0",
-    "ruff>=0.1.6",
-    "mypy>=1.7.0",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "black==26.5.1",
+    "ruff==0.16.2",
+    "mypy==2.3.0",
+    "locust==2.46.3",
 ]
 all = [
-    "mineralvision[ml,geo,viz,dev]",
+    "mineralvision[ml,dev]",
 ]
 
 [project.scripts]
