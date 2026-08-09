@@ -34,7 +34,8 @@ try:
     OPENSEARCH_AVAILABLE = True
 except ImportError:
     OPENSEARCH_AVAILABLE = False
-    logger.warning("opensearch-py not installed. Install with: pip install opensearch-py")
+
+from .._mock_fallback import real_client_unavailable
 
 
 class IndexType(Enum):
@@ -678,9 +679,20 @@ class OpenSearchIntegration:
         self.search: Optional[SearchEngine] = None
         self.documents: Optional[DocumentManager] = None
         self._connected = False
-    
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
+
     async def connect(self) -> 'OpenSearchIntegration':
-        """Connect to OpenSearch."""
+        """
+        Connect to OpenSearch (real client first).
+
+        Falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
         if OPENSEARCH_AVAILABLE:
             try:
                 self.client = AsyncOpenSearch(
@@ -688,17 +700,21 @@ class OpenSearchIntegration:
                     http_auth=(self.config.username, self.config.password),
                     use_ssl=self.config.use_ssl,
                     verify_certs=self.config.verify_certs,
-                    ssl_show_warn=self.config.ssl_show_warn
+                    ssl_show_warn=self.config.ssl_show_warn,
+                    timeout=5
                 )
                 # Test connection
                 await self.client.cluster.health()
                 logger.info(f"Connected to OpenSearch at {self.config.hosts}")
             except Exception as e:
-                logger.warning(f"Failed to connect to OpenSearch: {e}, using mock client")
-                self.client = MockOpenSearchClient(self.config)
+                if real_client_unavailable("OpenSearch", "connection failed", e):
+                    self._degraded = True
+                    self.client = MockOpenSearchClient(self.config)
         else:
-            self.client = MockOpenSearchClient(self.config)
-        
+            if real_client_unavailable("OpenSearch", "opensearch-py package not installed"):
+                self._degraded = True
+                self.client = MockOpenSearchClient(self.config)
+
         self.indices = IndexManager(self.client, self.config)
         self.search = SearchEngine(self.client, self.config)
         self.documents = DocumentManager(self.client, self.config)
@@ -720,8 +736,12 @@ class OpenSearchIntegration:
     async def health_check(self) -> Dict[str, Any]:
         """Check OpenSearch health."""
         if isinstance(self.client, MockOpenSearchClient):
-            return await self.client.get_cluster_health()
-        return await self.client.cluster.health()
+            health = await self.client.get_cluster_health()
+            health['degraded'] = True
+            return health
+        health = await self.client.cluster.health()
+        health['degraded'] = self._degraded
+        return health
     
     async def close(self) -> None:
         """Close the connection."""

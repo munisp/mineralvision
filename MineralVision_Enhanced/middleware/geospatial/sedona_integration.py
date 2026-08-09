@@ -35,7 +35,8 @@ try:
     SEDONA_AVAILABLE = True
 except ImportError:
     SEDONA_AVAILABLE = False
-    logger.warning("sedona not installed. Install with: pip install apache-sedona")
+
+from .._mock_fallback import real_client_unavailable
 
 
 class GeometryType(Enum):
@@ -513,9 +514,20 @@ class SedonaIntegration:
         self.config = config or SedonaConfig()
         self.context: Optional[MockSedonaContext] = None
         self._connected = False
-    
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
+
     async def connect(self) -> 'SedonaIntegration':
-        """Connect to Sedona."""
+        """
+        Connect to Sedona (real context first).
+
+        Falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
         if SEDONA_AVAILABLE:
             try:
                 # Initialize real Sedona context
@@ -525,11 +537,14 @@ class SedonaIntegration:
                 )
                 logger.info("Connected to Apache Sedona")
             except Exception as e:
-                logger.warning(f"Failed to connect to Sedona: {e}, using mock context")
-                self.context = MockSedonaContext(self.config)
+                if real_client_unavailable("Apache Sedona", "context creation failed", e):
+                    self._degraded = True
+                    self.context = MockSedonaContext(self.config)
         else:
-            self.context = MockSedonaContext(self.config)
-        
+            if real_client_unavailable("Apache Sedona", "sedona/spark packages not installed"):
+                self._degraded = True
+                self.context = MockSedonaContext(self.config)
+
         self._connected = True
         return self
     

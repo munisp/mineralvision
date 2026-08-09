@@ -19,7 +19,8 @@ import asyncio
 import json
 import logging
 import uuid
-import aiohttp
+# NOTE: aiohttp was imported here but never used; removed. A real APISIX
+# Admin API HTTP client (when implemented) should import it lazily.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -29,6 +30,8 @@ import hashlib
 import re
 
 logger = logging.getLogger(__name__)
+
+from .._mock_fallback import probe_url, real_client_unavailable
 
 
 class LoadBalancerType(Enum):
@@ -716,10 +719,29 @@ class ApisixGateway:
         self.plugins: Optional[ApisixPluginManager] = None
         self.consumers: Optional[ApisixConsumerManager] = None
         self._connected = False
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
     
     async def connect(self) -> 'ApisixGateway':
-        """Connect to APISIX Admin API."""
-        self.client = MockApisixClient(self.admin_url, self.api_key)
+        """
+        Connect to APISIX Admin API (real connection first).
+
+        A real HTTP client implementation is not available yet, so this
+        falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
+        reachable = probe_url(self.admin_url, timeout=2.0)
+        reason = (
+            f"server reachable at {self.admin_url} but real HTTP client not implemented"
+            if reachable else f"no APISIX server reachable at {self.admin_url}"
+        )
+        if real_client_unavailable("APISIX Gateway", reason):
+            self._degraded = True
+            self.client = MockApisixClient(self.admin_url, self.api_key)
         
         self.routes = ApisixRouteManager(self.client)
         self.upstreams = ApisixUpstreamManager(self.client)
@@ -733,8 +755,10 @@ class ApisixGateway:
     async def health_check(self) -> Dict[str, Any]:
         """Check APISIX health."""
         if self.client:
-            return await self.client.health_check()
-        return {"status": "disconnected"}
+            health = await self.client.health_check()
+            health['degraded'] = self._degraded
+            return health
+        return {"status": "disconnected", "degraded": self._degraded}
     
     async def setup_mineralvision_routes(self) -> Dict[str, Any]:
         """Setup default MineralVision API routes."""

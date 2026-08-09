@@ -873,13 +873,22 @@ class RasterProcessor:
     def __init__(self, spark_session: SedonaSparkSession = None):
         self.spark_session = spark_session
         self._rasterio_available = False
-        
+        self._degraded = False
+
         try:
             import rasterio
             import numpy as np
             self._rasterio_available = True
         except ImportError:
-            logger.warning("rasterio not available, using mock raster processing")
+            logger.info(
+                "rasterio not installed — raster processing will require "
+                "MV_ALLOW_MOCK_FALLBACK=true to use mock processing"
+            )
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
     
     def compute_zonal_statistics(self, raster_path: str,
                                 geometries: List[SpatialGeometry],
@@ -901,7 +910,15 @@ class RasterProcessor:
         
         if self._rasterio_available and os.path.exists(raster_path):
             return self._compute_zonal_rasterio(raster_path, geometries, statistics, band)
-        else:
+
+        # Real raster processing unavailable — explicit mock fallback only
+        reason = (
+            "rasterio not installed" if not self._rasterio_available
+            else f"raster file not found: {raster_path}"
+        )
+        from .._mock_fallback import real_client_unavailable
+        if real_client_unavailable("Sedona RasterProcessor", reason):
+            self._degraded = True
             return self._compute_zonal_mock(geometries, statistics)
     
     def _compute_zonal_rasterio(self, raster_path: str,

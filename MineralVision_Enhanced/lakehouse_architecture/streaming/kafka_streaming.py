@@ -25,6 +25,8 @@ import queue
 
 logger = logging.getLogger(__name__)
 
+from .._mock_fallback import real_client_unavailable
+
 
 class SerializationFormat(Enum):
     """Supported serialization formats."""
@@ -185,6 +187,7 @@ class KafkaConsumer:
         self.serializer = serializer or JsonSerializer()
         
         self._consumer = None
+        self._degraded = False
         self._running = False
         self._consumer_thread = None
         self._message_queue: queue.Queue = queue.Queue(maxsize=10000)
@@ -224,9 +227,11 @@ class KafkaConsumer:
             
             logger.info(f"Initialized Kafka consumer for topics: {self.topics}")
             
-        except ImportError:
-            logger.warning("confluent_kafka not available, using mock consumer")
-            self._consumer = None
+        except ImportError as exc:
+            # Real-client-first: mock consumer only when explicitly allowed
+            if real_client_unavailable("Kafka consumer", "confluent_kafka package not installed", exc):
+                self._degraded = True
+                self._consumer = None
     
     def start(self, message_handler: Callable[[StreamMessage], bool]):
         """
@@ -382,6 +387,7 @@ class KafkaProducer:
         self.serializer = serializer or JsonSerializer()
         
         self._producer = None
+        self._degraded = False
         self._delivery_reports: deque = deque(maxlen=10000)
         
         self._initialize()
@@ -416,9 +422,11 @@ class KafkaProducer:
             
             logger.info("Initialized Kafka producer")
             
-        except ImportError:
-            logger.warning("confluent_kafka not available, using mock producer")
-            self._producer = None
+        except ImportError as exc:
+            # Real-client-first: mock producer only when explicitly allowed
+            if real_client_unavailable("Kafka producer", "confluent_kafka package not installed", exc):
+                self._degraded = True
+                self._producer = None
     
     def produce(self, topic: str, value: Any, key: Optional[str] = None,
                headers: Optional[Dict[str, str]] = None,

@@ -29,6 +29,8 @@ import os
 
 logger = logging.getLogger(__name__)
 
+from .._mock_fallback import probe_url, real_client_unavailable
+
 
 class AlertLevel(Enum):
     """Wazuh alert severity levels."""
@@ -486,10 +488,29 @@ class WazuhSIEM:
         self.analyzer = AlertAnalyzer()
         self.compliance_checker = ComplianceChecker()
         self._connected = False
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
     
     async def connect(self) -> 'WazuhSIEM':
-        """Connect to Wazuh manager."""
-        self.api = MockWazuhAPI(self.config)
+        """
+        Connect to Wazuh manager (real connection first).
+
+        A real REST client implementation is not available yet, so this
+        falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
+        reachable = probe_url(self.config.manager_url, timeout=2.0)
+        reason = (
+            f"server reachable at {self.config.manager_url} but real REST client not implemented"
+            if reachable else f"no Wazuh manager reachable at {self.config.manager_url}"
+        )
+        if real_client_unavailable("Wazuh SIEM", reason):
+            self._degraded = True
+            self.api = MockWazuhAPI(self.config)
         await self.api.authenticate()
         self._connected = True
         logger.info(f"Connected to Wazuh at {self.config.manager_url}")

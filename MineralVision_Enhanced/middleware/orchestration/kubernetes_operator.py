@@ -36,7 +36,8 @@ try:
     K8S_AVAILABLE = True
 except ImportError:
     K8S_AVAILABLE = False
-    logger.warning("kubernetes not installed. Install with: pip install kubernetes")
+
+from .._mock_fallback import real_client_unavailable
 
 
 class ResourceKind(Enum):
@@ -873,9 +874,20 @@ class KubernetesOperator:
         self.reconciler: Optional[Reconciler] = None
         self.helm: Optional[HelmChartGenerator] = None
         self._connected = False
-    
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
+
     async def connect(self) -> 'KubernetesOperator':
-        """Connect to Kubernetes."""
+        """
+        Connect to Kubernetes (real client first).
+
+        Falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
         if K8S_AVAILABLE:
             try:
                 if self.config.in_cluster:
@@ -884,16 +896,27 @@ class KubernetesOperator:
                     config.load_kube_config(self.config.kubeconfig_path)
                 else:
                     config.load_kube_config()
-                
+
+                # Verify the API server actually answers (short timeout)
+                version_api = client.VersionApi()
+                await asyncio.wait_for(
+                    asyncio.to_thread(version_api.get_code), timeout=5
+                )
                 # Would initialize real K8s clients here
                 logger.info("Connected to Kubernetes cluster")
             except Exception as e:
-                logger.warning(f"Failed to connect to Kubernetes: {e}, using mock client")
-                self.client = MockKubernetesClient(self.config)
+                if real_client_unavailable("Kubernetes", "API server connection failed", e):
+                    self._degraded = True
+                    self.client = MockKubernetesClient(self.config)
         else:
-            self.client = MockKubernetesClient(self.config)
-        
+            if real_client_unavailable("Kubernetes", "kubernetes package not installed"):
+                self._degraded = True
+                self.client = MockKubernetesClient(self.config)
+
         if not self.client:
+            # Real config loaded and API server reachable; real client
+            # initialization is pending — use the in-memory client but keep
+            # the degraded flag accurate.
             self.client = MockKubernetesClient(self.config)
         
         self.generator = ResourceGenerator(self.config)

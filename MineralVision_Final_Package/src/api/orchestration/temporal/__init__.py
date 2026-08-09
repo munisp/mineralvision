@@ -15,7 +15,7 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-# Temporal SDK imports (with fallback for when SDK not installed)
+# Temporal SDK imports (optional — connect() enforces real-client-first)
 try:
     from temporalio import workflow, activity
     from temporalio.client import Client as TemporalClientSDK
@@ -24,7 +24,34 @@ try:
     TEMPORAL_AVAILABLE = True
 except ImportError:
     TEMPORAL_AVAILABLE = False
-    logger.warning("Temporal SDK not installed. Using mock implementation.")
+
+MOCK_FALLBACK_ENV = "MV_ALLOW_MOCK_FALLBACK"
+
+
+def _mock_fallback_allowed() -> bool:
+    """True only when MV_ALLOW_MOCK_FALLBACK=true is explicitly set."""
+    return os.environ.get(MOCK_FALLBACK_ENV, "").strip().lower() == "true"
+
+
+def _real_client_unavailable(reason: str, error: Exception = None) -> bool:
+    """
+    Handle an unavailable Temporal backend.
+
+    Returns True (mock mode, degraded) only when the fallback is explicitly
+    allowed; raises RuntimeError otherwise — never pretends success.
+    """
+    if _mock_fallback_allowed():
+        logger.warning(
+            "MV DEGRADED MODE: Temporal real client unavailable (%s%s). "
+            "Using in-memory MOCK because %s=true. Do NOT use in production.",
+            reason, f": {error}" if error else "", MOCK_FALLBACK_ENV,
+        )
+        return True
+    raise RuntimeError(
+        f"Temporal: real client unavailable ({reason}"
+        f"{f': {error}' if error else ''}). install temporalio / set "
+        f"{MOCK_FALLBACK_ENV}=true to explicitly enable mock mode."
+    ) from error
 
 
 class WorkflowStatus(str, Enum):
@@ -82,30 +109,49 @@ class TemporalClient:
         self.config = config or TemporalConfig()
         self._client: Optional[TemporalClientSDK] = None
         self._connected = False
-    
+        self._mock = False
+
     async def connect(self) -> bool:
-        """Connect to Temporal server."""
+        """
+        Connect to Temporal server (real client first).
+
+        Mock mode is used ONLY when MV_ALLOW_MOCK_FALLBACK=true;
+        otherwise a RuntimeError is raised when the SDK is missing or the
+        server is unreachable.
+        """
         if not TEMPORAL_AVAILABLE:
-            logger.warning("Temporal SDK not available, using mock mode")
-            self._connected = False
-            return False
-        
+            if _real_client_unavailable("temporalio SDK not installed"):
+                self._mock = True
+                self._connected = False
+                return False
+
         try:
-            self._client = await TemporalClientSDK.connect(
-                self.config.address,
-                namespace=self.config.namespace,
+            self._client = await asyncio.wait_for(
+                TemporalClientSDK.connect(
+                    self.config.address,
+                    namespace=self.config.namespace,
+                ),
+                timeout=5,
             )
             self._connected = True
+            self._mock = False
             logger.info(f"Connected to Temporal at {self.config.address}")
             return True
         except Exception as e:
-            logger.error(f"Failed to connect to Temporal: {e}")
-            self._connected = False
-            return False
-    
+            if _real_client_unavailable(f"cannot reach Temporal at {self.config.address}", e):
+                self._mock = True
+                self._client = None
+                self._connected = False
+                return False
+
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    @property
+    def degraded(self) -> bool:
+        """True when running in explicit mock mode (no real Temporal)."""
+        return self._mock
     
     async def start_workflow(
         self,
@@ -115,7 +161,7 @@ class TemporalClient:
         task_queue: str = None,
     ) -> str:
         """Start a new workflow execution."""
-        if not self._connected or not self._client:
+        if self._mock or not self._connected or not self._client:
             # Mock mode - return a fake run ID
             import uuid
             run_id = f"mock-{uuid.uuid4().hex[:8]}"
@@ -132,7 +178,7 @@ class TemporalClient:
     
     async def get_workflow_status(self, workflow_id: str) -> WorkflowStatus:
         """Get the status of a workflow."""
-        if not self._connected or not self._client:
+        if self._mock or not self._connected or not self._client:
             return WorkflowStatus.COMPLETED
         
         try:
@@ -157,7 +203,7 @@ class TemporalClient:
         args: Any = None,
     ):
         """Send a signal to a running workflow."""
-        if not self._connected or not self._client:
+        if self._mock or not self._connected or not self._client:
             logger.info(f"Mock signal sent to {workflow_id}: {signal_name}")
             return
         
@@ -170,7 +216,7 @@ class TemporalClient:
         query_name: str,
     ) -> Any:
         """Query a running workflow."""
-        if not self._connected or not self._client:
+        if self._mock or not self._connected or not self._client:
             return {"status": "mock", "current_step": "unknown"}
         
         handle = self._client.get_workflow_handle(workflow_id)
@@ -178,7 +224,7 @@ class TemporalClient:
     
     async def cancel_workflow(self, workflow_id: str):
         """Cancel a running workflow."""
-        if not self._connected or not self._client:
+        if self._mock or not self._connected or not self._client:
             logger.info(f"Mock workflow cancelled: {workflow_id}")
             return
         

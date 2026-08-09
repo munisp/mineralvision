@@ -37,7 +37,8 @@ try:
     DAPR_AVAILABLE = True
 except ImportError:
     DAPR_AVAILABLE = False
-    logger.warning("dapr not installed. Install with: pip install dapr")
+
+from .._mock_fallback import real_client_unavailable
 
 
 class DaprComponentType(Enum):
@@ -560,21 +561,38 @@ class DaprIntegration:
         self.secrets: Optional[DaprSecretManager] = None
         self.actors: Optional[DaprActorManager] = None
         self._connected = False
-    
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
+
     async def connect(self) -> 'DaprIntegration':
-        """Connect to Dapr sidecar."""
+        """
+        Connect to Dapr sidecar (real client first).
+
+        Falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
         if DAPR_AVAILABLE:
             try:
                 self.client = DaprClient(
-                    f"localhost:{self.config.dapr_grpc_port}"
+                    f"localhost:{self.config.dapr_grpc_port}",
+                    max_grpc_message_length=16 * 1024 * 1024
                 )
+                # Verify the sidecar actually answers
+                await self.client.wait(timeout_s=5)
                 logger.info(f"Connected to Dapr sidecar on port {self.config.dapr_grpc_port}")
             except Exception as e:
-                logger.warning(f"Failed to connect to Dapr: {e}, using mock client")
-                self.client = MockDaprClient(self.config)
+                if real_client_unavailable("Dapr", "sidecar connection failed", e):
+                    self._degraded = True
+                    self.client = MockDaprClient(self.config)
         else:
-            self.client = MockDaprClient(self.config)
-        
+            if real_client_unavailable("Dapr", "dapr package not installed"):
+                self._degraded = True
+                self.client = MockDaprClient(self.config)
+
         # Initialize managers
         self.state = DaprStateManager(self.client, self.config)
         self.pubsub = DaprPubSubManager(self.client, self.config)
@@ -600,6 +618,7 @@ class DaprIntegration:
         return {
             'connected': self._connected,
             'dapr_available': DAPR_AVAILABLE,
+            'degraded': self._degraded,
             'config': {
                 'app_id': self.config.app_id,
                 'http_port': self.config.dapr_http_port,

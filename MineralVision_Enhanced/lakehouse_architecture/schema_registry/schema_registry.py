@@ -23,6 +23,8 @@ import threading
 
 logger = logging.getLogger(__name__)
 
+from .._mock_fallback import real_client_unavailable
+
 
 class SchemaType(Enum):
     """Supported schema types."""
@@ -270,6 +272,7 @@ class ConfluentSchemaRegistry(SchemaStore):
         self.url = url.rstrip('/')
         self.auth = auth
         self._session = None
+        self._degraded = False
         self._initialize()
     
     def _initialize(self):
@@ -287,9 +290,11 @@ class ConfluentSchemaRegistry(SchemaStore):
             
             logger.info(f"Initialized Confluent Schema Registry client: {self.url}")
             
-        except ImportError:
-            logger.warning("requests not available, using mock client")
-            self._session = None
+        except ImportError as exc:
+            # Real-client-first: mock (registry disabled) only when explicitly allowed
+            if real_client_unavailable("Confluent Schema Registry client", "requests package not installed", exc):
+                self._degraded = True
+                self._session = None
     
     def register_schema(self, subject: str, schema: str,
                        schema_type: SchemaType) -> SchemaVersion:

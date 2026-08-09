@@ -24,6 +24,8 @@ import threading
 
 logger = logging.getLogger(__name__)
 
+from .._mock_fallback import real_client_unavailable
+
 
 class EventType(Enum):
     """Lineage event types."""
@@ -444,6 +446,7 @@ class MarquezClient(LineageStore):
         self.url = url.rstrip('/')
         self.namespace = namespace
         self._session = None
+        self._degraded = False
         self._initialize()
     
     def _initialize(self):
@@ -457,9 +460,11 @@ class MarquezClient(LineageStore):
             
             logger.info(f"Initialized Marquez client: {self.url}")
             
-        except ImportError:
-            logger.warning("requests not available, using mock client")
-            self._session = None
+        except ImportError as exc:
+            # Real-client-first: mock (events dropped) only when explicitly allowed
+            if real_client_unavailable("Marquez lineage client", "requests package not installed", exc):
+                self._degraded = True
+                self._session = None
     
     def store_event(self, event: LineageEvent):
         """Store a lineage event via Marquez API."""
