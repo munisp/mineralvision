@@ -1,56 +1,242 @@
 """
-Temporal Workflow Engine Integration
-=====================================
+Temporal Workflow Integration — Compatibility Shim
+===================================================
 
-Production-grade workflow orchestration using Temporal for:
-- Long-running geological analysis workflows
-- Distributed data processing pipelines
-- Retry and error handling for exploration tasks
-- Workflow versioning and migration
-- Activity heartbeating for long computations
+DEPRECATED LOCATION. The canonical Temporal implementation lives at:
 
-Temporal provides durable execution guarantees ensuring workflows
-complete even through failures, restarts, and deployments.
+    MineralVision_Final_Package/src/api/orchestration/temporal/
+
+This module is a thin compatibility shim: it re-exports the canonical
+client/manager and keeps the historical public names working. The
+duplicated Temporal client, mock client and workflow engine logic that
+previously lived here has been DELETED (temporal dedupe, wave 2).
+
+Import path handling
+--------------------
+The canonical module lives in a sibling package tree. This shim computes
+the repository root from its own file location and appends
+``<repo>/MineralVision_Final_Package`` to ``sys.path`` so the canonical
+module is importable as ``src.api.orchestration.temporal``. Alternatively,
+set ``PYTHONPATH=<repo>/MineralVision_Final_Package`` yourself.
+
+Real-client-first contract
+--------------------------
+The canonical ``TemporalClient.connect()`` raises ``RuntimeError`` when
+the temporalio SDK is missing or the server is unreachable, UNLESS
+``MV_ALLOW_MOCK_FALLBACK=true`` is explicitly set (mock mode, degraded).
+This shim inherits that behavior.
+
+Public name mapping
+--------------------
+- ``WorkflowStatus``, ``WorkflowRun``, ``TemporalConfig``,
+  ``TemporalClient``, ``WorkflowManager``, ``get_temporal_client``,
+  ``get_workflow_manager`` — re-exported from the canonical module.
+- ``TemporalWorkflowEngine`` — thin adapter over the canonical
+  ``TemporalClient``/``WorkflowManager`` preserving the legacy API.
+- ``MockTemporalClient`` / ``MockWorkflowHandle`` — REMOVED (no silent
+  mocks); accessing them raises a descriptive AttributeError.
+- MineralVision-specific workflow/activity definitions and registries
+  (``DataProcessingWorkflow``, ``MLTrainingWorkflow``,
+  ``ReportGenerationWorkflow``, ``SensorFusionWorkflow``,
+  ``ActivityRegistry``, ``WorkflowRegistry``,
+  ``ScheduledWorkflowManager``, decorators) are kept here unchanged —
+  they are domain definitions, not duplicated Temporal client logic.
 """
 
-import asyncio
-import json
 import logging
+import os
+import sys
 import uuid
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Type, TypeVar, Union
 from functools import wraps
-import threading
-import time
-import hashlib
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Type
 
 logger = logging.getLogger(__name__)
 
-# Try to import Temporal SDK
+# ---------------------------------------------------------------------------
+# Locate and import the canonical Temporal module
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_FINAL_PACKAGE = _REPO_ROOT / "MineralVision_Final_Package"
+
+if str(_FINAL_PACKAGE) not in sys.path:
+    sys.path.append(str(_FINAL_PACKAGE))
+
 try:
-    from temporalio import workflow, activity
-    from temporalio.client import Client as TemporalClient
-    from temporalio.worker import Worker
-    from temporalio.common import RetryPolicy
-    from temporalio.exceptions import ApplicationError
-    TEMPORAL_AVAILABLE = True
-except ImportError:
-    TEMPORAL_AVAILABLE = False
-    logger.warning("temporalio not installed. Install with: pip install temporalio")
+    from src.api.orchestration.temporal import (
+        WorkflowStatus,
+        WorkflowRun,
+        TemporalConfig,
+        TemporalClient,
+        WorkflowManager,
+        get_temporal_client,
+        get_workflow_manager,
+        TEMPORAL_AVAILABLE,
+    )
+except ImportError as exc:  # pragma: no cover - environment dependent
+    raise ImportError(
+        "Cannot import the canonical Temporal module "
+        "(src.api.orchestration.temporal). Expected repository layout: "
+        f"{_FINAL_PACKAGE}. Set PYTHONPATH=<repo>/MineralVision_Final_Package "
+        f"or restore the canonical module. Original error: {exc}"
+    ) from exc
+
+# Legacy alias kept for name compatibility
+WorkflowExecution = WorkflowRun
 
 
-class WorkflowStatus(Enum):
-    """Workflow execution status."""
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-    TIMED_OUT = "timed_out"
-    TERMINATED = "terminated"
+class TemporalWorkflowEngine:
+    """
+    Thin compatibility adapter over the canonical TemporalClient.
+
+    Preserves the legacy MineralVision_Enhanced engine API while delegating
+    ALL client logic to MineralVision_Final_Package/src/api/orchestration/
+    temporal. Mock mode is only available via MV_ALLOW_MOCK_FALLBACK=true
+    (see canonical module); check ``engine.degraded``.
+    """
+
+    def __init__(self, config: Dict[str, Any] = None):
+        self.config = config or {}
+        namespace = self.config.get('namespace')
+        target_host = self.config.get('target_host')  # e.g. "localhost:7233"
+        host = port = None
+        if target_host and ":" in target_host:
+            host, port_str = target_host.rsplit(":", 1)
+            try:
+                port = int(port_str)
+            except ValueError:
+                host, port = None, None
+
+        temporal_config = TemporalConfig(
+            host=host,
+            port=port,
+            namespace=namespace,
+            task_queue=self.config.get('default_task_queue'),
+        )
+        self.client = TemporalClient(temporal_config)
+        self.manager = WorkflowManager(self.client)
+        self._workers: List[Any] = []
+
+    @property
+    def degraded(self) -> bool:
+        """True when running in explicit mock mode (no real Temporal)."""
+        return self.client.degraded
+
+    @property
+    def _connected(self) -> bool:
+        return self.client.is_connected or self.client.degraded
+
+    async def connect(self) -> 'TemporalWorkflowEngine':
+        """Connect to the Temporal server via the canonical client."""
+        await self.client.connect()
+        return self
+
+    async def start_workflow(self, workflow_type: str,
+                            args: List[Any] = None,
+                            workflow_id: str = None,
+                            task_queue: str = None,
+                            **kwargs) -> str:
+        """Start a workflow execution; returns the run ID."""
+        if not self._connected:
+            await self.connect()
+
+        workflow_id = workflow_id or f"{workflow_type}-{uuid.uuid4()}"
+        run_id = await self.client.start_workflow(
+            workflow_type,
+            workflow_id,
+            {"args": args or [], **kwargs},
+            task_queue=task_queue,
+        )
+        logger.info(f"Started workflow {workflow_type} with ID {workflow_id}")
+        return run_id
+
+    async def get_workflow(self, workflow_id: str) -> Optional[WorkflowRun]:
+        """Get a workflow run by ID."""
+        return await self.manager.get_run(workflow_id)
+
+    async def list_workflows(self, query: str = None,
+                            status: WorkflowStatus = None) -> List[WorkflowRun]:
+        """List workflow executions (journey_id filter via `query`)."""
+        return await self.manager.list_runs(journey_id=query, status=status)
+
+    async def cancel_workflow(self, workflow_id: str) -> None:
+        """Cancel a running workflow."""
+        await self.client.cancel_workflow(workflow_id)
+        logger.info(f"Cancelled workflow {workflow_id}")
+
+    async def terminate_workflow(self, workflow_id: str, reason: str = None) -> None:
+        """Terminate a workflow (mapped to cancel)."""
+        await self.client.cancel_workflow(workflow_id)
+        logger.info(f"Terminated workflow {workflow_id}: {reason}")
+
+    async def signal_workflow(self, workflow_id: str, signal_name: str, *args) -> None:
+        """Send a signal to a workflow."""
+        payload = args[0] if args else None
+        await self.client.signal_workflow(workflow_id, signal_name, payload)
+
+    async def query_workflow(self, workflow_id: str, query_name: str, *args) -> Any:
+        """Query a workflow."""
+        return await self.client.query_workflow(workflow_id, query_name)
+
+    async def start_worker(self, task_queue: str = None,
+                          activities: List[Callable] = None,
+                          workflows: List[Type] = None) -> None:
+        """Start a workflow worker (requires the real temporalio SDK)."""
+        if not TEMPORAL_AVAILABLE:
+            raise RuntimeError(
+                "temporalio SDK is not installed — cannot start a worker. "
+                "install temporalio"
+            )
+        from temporalio.worker import Worker
+
+        if not self.client.is_connected:
+            raise RuntimeError(
+                "Worker requires a connected real Temporal client "
+                f"(degraded={self.degraded})"
+            )
+
+        task_queue = task_queue or self.config.get('default_task_queue', 'mineralvision-workflows')
+        worker = Worker(
+            self.client._client,
+            task_queue=task_queue,
+            activities=activities or [],
+            workflows=workflows or []
+        )
+        self._workers.append(worker)
+        import asyncio
+        asyncio.create_task(worker.run())
+        logger.info(f"Started worker on task queue {task_queue}")
+
+    async def shutdown(self) -> None:
+        """Shutdown the workflow engine."""
+        for worker in self._workers:
+            if hasattr(worker, 'shutdown'):
+                await worker.shutdown()
+        self._workers.clear()
+        logger.info("Temporal workflow engine shutdown complete")
+
+
+# Removed mocks — fail loudly if legacy code asks for them
+_REMOVED_NAMES = {"MockTemporalClient", "MockWorkflowHandle"}
+
+
+def __getattr__(name: str):
+    if name in _REMOVED_NAMES:
+        raise AttributeError(
+            f"{name} was removed (no silent mocks). Use TemporalClient with "
+            "a real Temporal server, or set MV_ALLOW_MOCK_FALLBACK=true to "
+            "explicitly enable the canonical mock mode (degraded)."
+        )
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# ---------------------------------------------------------------------------
+# MineralVision-specific workflow/activity definitions (domain logic, kept)
+# ---------------------------------------------------------------------------
 
 
 class ActivityType(Enum):
@@ -102,72 +288,43 @@ class WorkflowConfig:
     search_attributes: Dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
-class WorkflowExecution:
-    """Represents a workflow execution."""
-    workflow_id: str
-    run_id: str
-    workflow_type: str
-    status: WorkflowStatus
-    start_time: datetime
-    end_time: Optional[datetime] = None
-    result: Optional[Any] = None
-    error: Optional[str] = None
-    input_data: Dict[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {
-            'workflow_id': self.workflow_id,
-            'run_id': self.run_id,
-            'workflow_type': self.workflow_type,
-            'status': self.status.value,
-            'start_time': self.start_time.isoformat(),
-            'end_time': self.end_time.isoformat() if self.end_time else None,
-            'result': self.result,
-            'error': self.error,
-            'input_data': self.input_data,
-            'metadata': self.metadata
-        }
-
-
 class ActivityRegistry:
     """Registry for workflow activities."""
-    
+
     def __init__(self):
         self._activities: Dict[str, Callable] = {}
         self._configs: Dict[str, ActivityConfig] = {}
-    
+
     def register(self, config: ActivityConfig) -> Callable:
         """Decorator to register an activity."""
         def decorator(func: Callable) -> Callable:
             self._activities[config.name] = func
             self._configs[config.name] = config
-            
+
             @wraps(func)
             async def wrapper(*args, **kwargs):
                 return await func(*args, **kwargs)
-            
+
             return wrapper
         return decorator
-    
+
     def get_activity(self, name: str) -> Optional[Callable]:
         return self._activities.get(name)
-    
+
     def get_config(self, name: str) -> Optional[ActivityConfig]:
         return self._configs.get(name)
-    
+
     def list_activities(self) -> List[str]:
         return list(self._activities.keys())
 
 
 class WorkflowRegistry:
     """Registry for workflows."""
-    
+
     def __init__(self):
         self._workflows: Dict[str, Type] = {}
         self._configs: Dict[str, WorkflowConfig] = {}
-    
+
     def register(self, config: WorkflowConfig) -> Callable:
         """Decorator to register a workflow."""
         def decorator(cls: Type) -> Type:
@@ -175,13 +332,13 @@ class WorkflowRegistry:
             self._configs[config.name] = config
             return cls
         return decorator
-    
+
     def get_workflow(self, name: str) -> Optional[Type]:
         return self._workflows.get(name)
-    
+
     def get_config(self, name: str) -> Optional[WorkflowConfig]:
         return self._configs.get(name)
-    
+
     def list_workflows(self) -> List[str]:
         return list(self._workflows.keys())
 
@@ -191,331 +348,10 @@ activity_registry = ActivityRegistry()
 workflow_registry = WorkflowRegistry()
 
 
-class MockTemporalClient:
-    """Mock Temporal client for environments without Temporal."""
-    
-    def __init__(self, namespace: str = "default"):
-        self.namespace = namespace
-        self._executions: Dict[str, WorkflowExecution] = {}
-        self._running = False
-        self._lock = threading.Lock()
-    
-    async def connect(self, target_host: str = "localhost:7233") -> 'MockTemporalClient':
-        logger.info(f"MockTemporalClient connected to {target_host}")
-        self._running = True
-        return self
-    
-    async def start_workflow(self, workflow_type: str, 
-                            args: List[Any] = None,
-                            id: str = None,
-                            task_queue: str = "default",
-                            **kwargs) -> 'MockWorkflowHandle':
-        workflow_id = id or str(uuid.uuid4())
-        run_id = str(uuid.uuid4())
-        
-        execution = WorkflowExecution(
-            workflow_id=workflow_id,
-            run_id=run_id,
-            workflow_type=workflow_type,
-            status=WorkflowStatus.RUNNING,
-            start_time=datetime.now(),
-            input_data={'args': args or [], 'kwargs': kwargs}
-        )
-        
-        with self._lock:
-            self._executions[workflow_id] = execution
-        
-        # Simulate workflow execution
-        asyncio.create_task(self._execute_workflow(workflow_id, workflow_type, args or []))
-        
-        return MockWorkflowHandle(self, workflow_id, run_id)
-    
-    async def _execute_workflow(self, workflow_id: str, workflow_type: str, args: List[Any]):
-        """Simulate workflow execution."""
-        await asyncio.sleep(0.1)  # Simulate processing
-        
-        with self._lock:
-            if workflow_id in self._executions:
-                execution = self._executions[workflow_id]
-                execution.status = WorkflowStatus.COMPLETED
-                execution.end_time = datetime.now()
-                execution.result = {"status": "completed", "workflow_type": workflow_type}
-    
-    async def get_workflow_handle(self, workflow_id: str) -> 'MockWorkflowHandle':
-        with self._lock:
-            if workflow_id in self._executions:
-                return MockWorkflowHandle(self, workflow_id, 
-                                         self._executions[workflow_id].run_id)
-        raise ValueError(f"Workflow {workflow_id} not found")
-    
-    async def list_workflows(self, query: str = None) -> List[WorkflowExecution]:
-        with self._lock:
-            return list(self._executions.values())
-    
-    def close(self):
-        self._running = False
-
-
-class MockWorkflowHandle:
-    """Mock workflow handle."""
-    
-    def __init__(self, client: MockTemporalClient, workflow_id: str, run_id: str):
-        self._client = client
-        self.id = workflow_id
-        self.run_id = run_id
-    
-    async def result(self, timeout: timedelta = None) -> Any:
-        """Wait for workflow result."""
-        max_wait = (timeout or timedelta(minutes=5)).total_seconds()
-        start = time.time()
-        
-        while time.time() - start < max_wait:
-            with self._client._lock:
-                if self.id in self._client._executions:
-                    execution = self._client._executions[self.id]
-                    if execution.status == WorkflowStatus.COMPLETED:
-                        return execution.result
-                    elif execution.status == WorkflowStatus.FAILED:
-                        raise Exception(execution.error or "Workflow failed")
-            await asyncio.sleep(0.1)
-        
-        raise TimeoutError("Workflow did not complete in time")
-    
-    async def cancel(self):
-        """Cancel the workflow."""
-        with self._client._lock:
-            if self.id in self._client._executions:
-                self._client._executions[self.id].status = WorkflowStatus.CANCELLED
-    
-    async def terminate(self, reason: str = None):
-        """Terminate the workflow."""
-        with self._client._lock:
-            if self.id in self._client._executions:
-                execution = self._client._executions[self.id]
-                execution.status = WorkflowStatus.TERMINATED
-                execution.error = reason
-    
-    async def signal(self, signal_name: str, *args):
-        """Send a signal to the workflow."""
-        logger.info(f"Signal {signal_name} sent to workflow {self.id}")
-    
-    async def query(self, query_name: str, *args) -> Any:
-        """Query the workflow."""
-        return {"query": query_name, "workflow_id": self.id}
-    
-    async def describe(self) -> Dict[str, Any]:
-        """Describe the workflow execution."""
-        with self._client._lock:
-            if self.id in self._client._executions:
-                return self._client._executions[self.id].to_dict()
-        return {}
-
-
-class TemporalWorkflowEngine:
-    """
-    Temporal workflow engine for MineralVision.
-    
-    Provides durable workflow execution for:
-    - Data processing pipelines
-    - ML training workflows
-    - Report generation
-    - Scheduled tasks
-    
-    Example:
-        engine = TemporalWorkflowEngine()
-        await engine.connect()
-        
-        # Start a workflow
-        handle = await engine.start_workflow(
-            "data_processing_workflow",
-            args=[{"dataset_id": "ds-123"}]
-        )
-        
-        # Wait for result
-        result = await handle.result()
-    """
-    
-    def __init__(self, config: Dict[str, Any] = None):
-        self.config = config or {}
-        self.namespace = self.config.get('namespace', 'mineralvision')
-        self.target_host = self.config.get('target_host', 'localhost:7233')
-        self.client = None
-        self._workers: List[Any] = []
-        self._connected = False
-    
-    async def connect(self) -> 'TemporalWorkflowEngine':
-        """Connect to Temporal server."""
-        if TEMPORAL_AVAILABLE:
-            try:
-                self.client = await TemporalClient.connect(
-                    self.target_host,
-                    namespace=self.namespace
-                )
-                self._connected = True
-                logger.info(f"Connected to Temporal at {self.target_host}")
-            except Exception as e:
-                logger.warning(f"Failed to connect to Temporal: {e}, using mock client")
-                self.client = await MockTemporalClient(self.namespace).connect(self.target_host)
-                self._connected = True
-        else:
-            self.client = await MockTemporalClient(self.namespace).connect(self.target_host)
-            self._connected = True
-        
-        return self
-    
-    async def start_workflow(self, workflow_type: str,
-                            args: List[Any] = None,
-                            workflow_id: str = None,
-                            task_queue: str = None,
-                            **kwargs) -> Any:
-        """
-        Start a workflow execution.
-        
-        Args:
-            workflow_type: Name of the workflow to execute
-            args: Arguments to pass to the workflow
-            workflow_id: Optional workflow ID (auto-generated if not provided)
-            task_queue: Task queue for the workflow
-            **kwargs: Additional workflow options
-            
-        Returns:
-            Workflow handle
-        """
-        if not self._connected:
-            await self.connect()
-        
-        workflow_id = workflow_id or f"{workflow_type}-{uuid.uuid4()}"
-        task_queue = task_queue or self.config.get('default_task_queue', 'mineralvision-workflows')
-        
-        if TEMPORAL_AVAILABLE and not isinstance(self.client, MockTemporalClient):
-            # Get workflow class from registry
-            workflow_cls = workflow_registry.get_workflow(workflow_type)
-            if workflow_cls:
-                handle = await self.client.start_workflow(
-                    workflow_cls.run,
-                    args=args or [],
-                    id=workflow_id,
-                    task_queue=task_queue,
-                    **kwargs
-                )
-            else:
-                # Dynamic workflow execution
-                handle = await self.client.start_workflow(
-                    workflow_type,
-                    args=args or [],
-                    id=workflow_id,
-                    task_queue=task_queue,
-                    **kwargs
-                )
-        else:
-            handle = await self.client.start_workflow(
-                workflow_type,
-                args=args or [],
-                id=workflow_id,
-                task_queue=task_queue,
-                **kwargs
-            )
-        
-        logger.info(f"Started workflow {workflow_type} with ID {workflow_id}")
-        return handle
-    
-    async def get_workflow(self, workflow_id: str) -> Any:
-        """Get a workflow handle by ID."""
-        if not self._connected:
-            await self.connect()
-        
-        return await self.client.get_workflow_handle(workflow_id)
-    
-    async def list_workflows(self, query: str = None,
-                            status: WorkflowStatus = None) -> List[WorkflowExecution]:
-        """List workflow executions."""
-        if not self._connected:
-            await self.connect()
-        
-        if isinstance(self.client, MockTemporalClient):
-            executions = await self.client.list_workflows(query)
-            if status:
-                executions = [e for e in executions if e.status == status]
-            return executions
-        
-        # Real Temporal client
-        query_str = query or ""
-        if status:
-            query_str += f" AND ExecutionStatus = '{status.value}'"
-        
-        executions = []
-        async for workflow in self.client.list_workflows(query=query_str):
-            executions.append(WorkflowExecution(
-                workflow_id=workflow.id,
-                run_id=workflow.run_id,
-                workflow_type=workflow.workflow_type,
-                status=WorkflowStatus(workflow.status.name.lower()),
-                start_time=workflow.start_time,
-                end_time=workflow.close_time
-            ))
-        
-        return executions
-    
-    async def cancel_workflow(self, workflow_id: str) -> None:
-        """Cancel a running workflow."""
-        handle = await self.get_workflow(workflow_id)
-        await handle.cancel()
-        logger.info(f"Cancelled workflow {workflow_id}")
-    
-    async def terminate_workflow(self, workflow_id: str, reason: str = None) -> None:
-        """Terminate a workflow."""
-        handle = await self.get_workflow(workflow_id)
-        await handle.terminate(reason)
-        logger.info(f"Terminated workflow {workflow_id}: {reason}")
-    
-    async def signal_workflow(self, workflow_id: str, signal_name: str, *args) -> None:
-        """Send a signal to a workflow."""
-        handle = await self.get_workflow(workflow_id)
-        await handle.signal(signal_name, *args)
-    
-    async def query_workflow(self, workflow_id: str, query_name: str, *args) -> Any:
-        """Query a workflow."""
-        handle = await self.get_workflow(workflow_id)
-        return await handle.query(query_name, *args)
-    
-    async def start_worker(self, task_queue: str = None,
-                          activities: List[Callable] = None,
-                          workflows: List[Type] = None) -> None:
-        """Start a workflow worker."""
-        task_queue = task_queue or self.config.get('default_task_queue', 'mineralvision-workflows')
-        
-        if TEMPORAL_AVAILABLE and not isinstance(self.client, MockTemporalClient):
-            worker = Worker(
-                self.client,
-                task_queue=task_queue,
-                activities=activities or [],
-                workflows=workflows or []
-            )
-            self._workers.append(worker)
-            asyncio.create_task(worker.run())
-            logger.info(f"Started worker on task queue {task_queue}")
-        else:
-            logger.info(f"Mock worker started on task queue {task_queue}")
-    
-    async def shutdown(self) -> None:
-        """Shutdown the workflow engine."""
-        for worker in self._workers:
-            if hasattr(worker, 'shutdown'):
-                await worker.shutdown()
-        
-        if self.client and hasattr(self.client, 'close'):
-            self.client.close()
-        
-        self._connected = False
-        logger.info("Temporal workflow engine shutdown complete")
-
-
-# Pre-defined MineralVision Workflows
-
 class DataProcessingWorkflow:
     """
     Workflow for processing geological data.
-    
+
     Steps:
     1. Validate input data
     2. Transform and clean data
@@ -523,7 +359,7 @@ class DataProcessingWorkflow:
     4. Store processed data
     5. Generate processing report
     """
-    
+
     @staticmethod
     async def run(input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Execute the data processing workflow."""
@@ -532,52 +368,23 @@ class DataProcessingWorkflow:
             'start_time': datetime.now().isoformat(),
             'steps': []
         }
-        
-        # Step 1: Validate
-        results['steps'].append({
-            'name': 'validate',
-            'status': 'completed',
-            'duration_ms': 150
-        })
-        
-        # Step 2: Transform
-        results['steps'].append({
-            'name': 'transform',
-            'status': 'completed',
-            'duration_ms': 500
-        })
-        
-        # Step 3: Quality check
-        results['steps'].append({
-            'name': 'quality_check',
-            'status': 'completed',
-            'duration_ms': 200
-        })
-        
-        # Step 4: Store
-        results['steps'].append({
-            'name': 'store',
-            'status': 'completed',
-            'duration_ms': 300
-        })
-        
-        # Step 5: Report
-        results['steps'].append({
-            'name': 'report',
-            'status': 'completed',
-            'duration_ms': 100
-        })
-        
+
+        results['steps'].append({'name': 'validate', 'status': 'completed', 'duration_ms': 150})
+        results['steps'].append({'name': 'transform', 'status': 'completed', 'duration_ms': 500})
+        results['steps'].append({'name': 'quality_check', 'status': 'completed', 'duration_ms': 200})
+        results['steps'].append({'name': 'store', 'status': 'completed', 'duration_ms': 300})
+        results['steps'].append({'name': 'report', 'status': 'completed', 'duration_ms': 100})
+
         results['end_time'] = datetime.now().isoformat()
         results['status'] = 'completed'
-        
+
         return results
 
 
 class MLTrainingWorkflow:
     """
     Workflow for ML model training.
-    
+
     Steps:
     1. Prepare training data
     2. Configure model
@@ -586,13 +393,13 @@ class MLTrainingWorkflow:
     5. Register model
     6. Deploy model (optional)
     """
-    
+
     @staticmethod
     async def run(config: Dict[str, Any]) -> Dict[str, Any]:
         """Execute the ML training workflow."""
         model_name = config.get('model_name', 'mineral_classifier')
         epochs = config.get('epochs', 10)
-        
+
         results = {
             'workflow_id': str(uuid.uuid4()),
             'model_name': model_name,
@@ -600,32 +407,31 @@ class MLTrainingWorkflow:
             'training_config': config,
             'metrics': {}
         }
-        
-        # Simulate training
+
         for epoch in range(min(epochs, 5)):
             results['metrics'][f'epoch_{epoch+1}'] = {
                 'loss': 1.0 - (epoch * 0.15),
                 'accuracy': 0.5 + (epoch * 0.08)
             }
-        
+
         results['final_metrics'] = {
             'accuracy': 0.85,
             'precision': 0.82,
             'recall': 0.88,
             'f1_score': 0.85
         }
-        
+
         results['model_artifact'] = f"models/{model_name}/v1"
         results['end_time'] = datetime.now().isoformat()
         results['status'] = 'completed'
-        
+
         return results
 
 
 class ReportGenerationWorkflow:
     """
     Workflow for generating geological reports.
-    
+
     Steps:
     1. Gather data
     2. Run analyses
@@ -634,20 +440,19 @@ class ReportGenerationWorkflow:
     5. Export to formats (PDF, DOCX)
     6. Distribute report
     """
-    
+
     @staticmethod
     async def run(report_config: Dict[str, Any]) -> Dict[str, Any]:
         """Execute the report generation workflow."""
         report_type = report_config.get('report_type', 'exploration_summary')
-        
+
         results = {
             'workflow_id': str(uuid.uuid4()),
             'report_type': report_type,
             'start_time': datetime.now().isoformat(),
             'sections': []
         }
-        
-        # Generate sections
+
         sections = ['executive_summary', 'methodology', 'results', 'conclusions', 'appendices']
         for section in sections:
             results['sections'].append({
@@ -655,19 +460,19 @@ class ReportGenerationWorkflow:
                 'status': 'completed',
                 'page_count': 5
             })
-        
+
         results['output_formats'] = ['pdf', 'docx', 'html']
         results['total_pages'] = 25
         results['end_time'] = datetime.now().isoformat()
         results['status'] = 'completed'
-        
+
         return results
 
 
 class SensorFusionWorkflow:
     """
     Workflow for fusing multi-sensor data.
-    
+
     Steps:
     1. Ingest sensor data streams
     2. Synchronize timestamps
@@ -676,32 +481,31 @@ class SensorFusionWorkflow:
     5. Validate fusion results
     6. Store fused data
     """
-    
+
     @staticmethod
     async def run(sensor_config: Dict[str, Any]) -> Dict[str, Any]:
         """Execute the sensor fusion workflow."""
         sensors = sensor_config.get('sensors', ['magnetometer', 'spectrometer', 'lidar'])
-        
+
         results = {
             'workflow_id': str(uuid.uuid4()),
             'sensors': sensors,
             'start_time': datetime.now().isoformat(),
             'fusion_results': {}
         }
-        
-        # Process each sensor
+
         for sensor in sensors:
             results['fusion_results'][sensor] = {
                 'records_processed': 10000,
                 'quality_score': 0.95,
                 'calibration_applied': True
             }
-        
+
         results['fused_dataset_id'] = f"fused-{uuid.uuid4()}"
         results['total_records'] = len(sensors) * 10000
         results['end_time'] = datetime.now().isoformat()
         results['status'] = 'completed'
-        
+
         return results
 
 
@@ -803,29 +607,23 @@ def activity_definition(name: str, activity_type: ActivityType, **kwargs):
 
 class ScheduledWorkflowManager:
     """Manager for scheduled/cron workflows."""
-    
+
     def __init__(self, engine: TemporalWorkflowEngine):
         self.engine = engine
         self._schedules: Dict[str, Dict[str, Any]] = {}
-    
+
     async def schedule_workflow(self, workflow_type: str,
                                cron_expression: str,
                                args: List[Any] = None,
                                workflow_id_prefix: str = None) -> str:
         """
         Schedule a workflow to run on a cron schedule.
-        
-        Args:
-            workflow_type: Type of workflow to schedule
-            cron_expression: Cron expression (e.g., "0 0 * * *" for daily)
-            args: Arguments to pass to workflow
-            workflow_id_prefix: Prefix for workflow IDs
-            
+
         Returns:
             Schedule ID
         """
         schedule_id = f"schedule-{uuid.uuid4()}"
-        
+
         self._schedules[schedule_id] = {
             'workflow_type': workflow_type,
             'cron_expression': cron_expression,
@@ -836,25 +634,25 @@ class ScheduledWorkflowManager:
             'next_run': None,
             'enabled': True
         }
-        
+
         logger.info(f"Scheduled workflow {workflow_type} with cron {cron_expression}")
         return schedule_id
-    
+
     async def pause_schedule(self, schedule_id: str) -> None:
         """Pause a scheduled workflow."""
         if schedule_id in self._schedules:
             self._schedules[schedule_id]['enabled'] = False
-    
+
     async def resume_schedule(self, schedule_id: str) -> None:
         """Resume a scheduled workflow."""
         if schedule_id in self._schedules:
             self._schedules[schedule_id]['enabled'] = True
-    
+
     async def delete_schedule(self, schedule_id: str) -> None:
         """Delete a scheduled workflow."""
         if schedule_id in self._schedules:
             del self._schedules[schedule_id]
-    
+
     def list_schedules(self) -> List[Dict[str, Any]]:
         """List all scheduled workflows."""
         return [
@@ -866,3 +664,42 @@ class ScheduledWorkflowManager:
 def create_scheduled_manager(engine: TemporalWorkflowEngine) -> ScheduledWorkflowManager:
     """Create a scheduled workflow manager."""
     return ScheduledWorkflowManager(engine)
+
+
+__all__ = [
+    # Canonical re-exports
+    "WorkflowStatus",
+    "WorkflowRun",
+    "WorkflowExecution",
+    "TemporalConfig",
+    "TemporalClient",
+    "WorkflowManager",
+    "get_temporal_client",
+    "get_workflow_manager",
+    "TEMPORAL_AVAILABLE",
+    # Adapter engine
+    "TemporalWorkflowEngine",
+    "create_temporal_engine",
+    "create_and_connect_engine",
+    # Domain definitions
+    "ActivityType",
+    "RetryConfig",
+    "ActivityConfig",
+    "WorkflowConfig",
+    "ActivityRegistry",
+    "WorkflowRegistry",
+    "activity_registry",
+    "workflow_registry",
+    "DataProcessingWorkflow",
+    "MLTrainingWorkflow",
+    "ReportGenerationWorkflow",
+    "SensorFusionWorkflow",
+    "validate_data",
+    "process_geospatial",
+    "run_ml_inference",
+    "send_notification",
+    "workflow_definition",
+    "activity_definition",
+    "ScheduledWorkflowManager",
+    "create_scheduled_manager",
+]

@@ -36,7 +36,8 @@ try:
     FLINK_AVAILABLE = True
 except ImportError:
     FLINK_AVAILABLE = False
-    logger.warning("pyflink not installed. Install with: pip install apache-flink")
+
+from .._mock_fallback import real_client_unavailable
 
 
 T = TypeVar('T')
@@ -535,9 +536,20 @@ class FlinkIntegration:
         self.processor: Optional[StreamProcessor] = None
         self.cep: Optional[CEPEngine] = None
         self._connected = False
-    
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
+
     async def connect(self) -> 'FlinkIntegration':
-        """Connect to Flink."""
+        """
+        Connect to Flink (real environment first).
+
+        Falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
         if FLINK_AVAILABLE:
             try:
                 # Initialize real Flink environment
@@ -545,11 +557,14 @@ class FlinkIntegration:
                 self.env.set_parallelism(self.config.parallelism)
                 logger.info(f"Connected to Apache Flink at {self.config.job_manager_url}")
             except Exception as e:
-                logger.warning(f"Failed to connect to Flink: {e}, using mock environment")
-                self.env = MockFlinkEnvironment(self.config)
+                if real_client_unavailable("Apache Flink", "environment creation failed", e):
+                    self._degraded = True
+                    self.env = MockFlinkEnvironment(self.config)
         else:
-            self.env = MockFlinkEnvironment(self.config)
-        
+            if real_client_unavailable("Apache Flink", "pyflink package not installed"):
+                self._degraded = True
+                self.env = MockFlinkEnvironment(self.config)
+
         self.processor = StreamProcessor(self.env)
         self.cep = CEPEngine(self.env)
         

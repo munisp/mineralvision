@@ -38,6 +38,8 @@ except ImportError:
     REDIS_AVAILABLE = False
     logger.warning("redis not installed. Install with: pip install redis")
 
+from .._mock_fallback import real_client_unavailable
+
 
 class CacheStrategy(Enum):
     """Cache eviction strategies."""
@@ -706,9 +708,20 @@ class RedisIntegration:
         self.rate_limiter: Optional[RateLimiter] = None
         self.locks: Optional[DistributedLock] = None
         self._connected = False
-    
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
+
     async def connect(self) -> 'RedisIntegration':
-        """Connect to Redis."""
+        """
+        Connect to Redis (real client first).
+
+        Falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
         if REDIS_AVAILABLE:
             try:
                 self.client = Redis(
@@ -717,31 +730,36 @@ class RedisIntegration:
                     password=self.config.password,
                     db=self.config.db,
                     ssl=self.config.ssl,
-                    decode_responses=self.config.decode_responses
+                    decode_responses=self.config.decode_responses,
+                    socket_connect_timeout=self.config.socket_timeout,
+                    socket_timeout=self.config.socket_timeout
                 )
                 await self.client.ping()
                 logger.info(f"Connected to Redis at {self.config.host}:{self.config.port}")
             except Exception as e:
-                logger.warning(f"Failed to connect to Redis: {e}, using mock client")
-                self.client = MockRedisClient(self.config)
+                if real_client_unavailable("Redis", "connection failed", e):
+                    self._degraded = True
+                    self.client = MockRedisClient(self.config)
         else:
-            self.client = MockRedisClient(self.config)
-        
+            if real_client_unavailable("Redis", "redis package not installed"):
+                self._degraded = True
+                self.client = MockRedisClient(self.config)
+
         self.cache = CacheManager(self.client)
         self.sessions = SessionManager(self.client)
         self.rate_limiter = RateLimiter(self.client)
         self.locks = DistributedLock(self.client)
-        
+
         self._connected = True
         return self
-    
+
     async def health_check(self) -> Dict[str, Any]:
         """Check Redis health."""
         try:
             pong = await self.client.ping()
-            return {'status': 'healthy', 'ping': pong}
+            return {'status': 'healthy', 'ping': pong, 'degraded': self._degraded}
         except Exception as e:
-            return {'status': 'unhealthy', 'error': str(e)}
+            return {'status': 'unhealthy', 'error': str(e), 'degraded': self._degraded}
     
     async def close(self) -> None:
         """Close connection."""

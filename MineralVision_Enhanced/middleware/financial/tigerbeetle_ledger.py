@@ -33,7 +33,8 @@ try:
     TIGERBEETLE_AVAILABLE = True
 except ImportError:
     TIGERBEETLE_AVAILABLE = False
-    logger.warning("tigerbeetle not installed. Install with: pip install tigerbeetle")
+
+from .._mock_fallback import real_client_unavailable
 
 
 class AccountFlags(IntFlag):
@@ -591,9 +592,20 @@ class TigerBeetleLedger:
         self.accounts: Optional[AccountManager] = None
         self.transfers: Optional[TransferManager] = None
         self._connected = False
-    
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
+
     async def connect(self) -> 'TigerBeetleLedger':
-        """Connect to TigerBeetle."""
+        """
+        Connect to TigerBeetle (real client first).
+
+        Falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
         if TIGERBEETLE_AVAILABLE:
             try:
                 self.client = tigerbeetle.Client(
@@ -603,10 +615,13 @@ class TigerBeetleLedger:
                 )
                 logger.info(f"Connected to TigerBeetle cluster {self.config.cluster_id}")
             except Exception as e:
-                logger.warning(f"Failed to connect to TigerBeetle: {e}, using mock client")
-                self.client = MockTigerBeetleClient(self.config)
+                if real_client_unavailable("TigerBeetle", "cluster connection failed", e):
+                    self._degraded = True
+                    self.client = MockTigerBeetleClient(self.config)
         else:
-            self.client = MockTigerBeetleClient(self.config)
+            if real_client_unavailable("TigerBeetle", "tigerbeetle package not installed"):
+                self._degraded = True
+                self.client = MockTigerBeetleClient(self.config)
         
         self.accounts = AccountManager(self.client)
         self.transfers = TransferManager(self.client)

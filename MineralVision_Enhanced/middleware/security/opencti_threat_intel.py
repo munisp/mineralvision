@@ -28,6 +28,8 @@ import re
 
 logger = logging.getLogger(__name__)
 
+from .._mock_fallback import probe_url, real_client_unavailable
+
 
 class IndicatorType(Enum):
     """Types of indicators."""
@@ -541,10 +543,29 @@ class OpenCTIThreatIntel:
         self.client: Optional[MockOpenCTIClient] = None
         self.matcher: Optional[ThreatMatcher] = None
         self._connected = False
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
     
     async def connect(self) -> 'OpenCTIThreatIntel':
-        """Connect to OpenCTI."""
-        self.client = MockOpenCTIClient(self.config)
+        """
+        Connect to OpenCTI (real connection first).
+
+        A real GraphQL client implementation is not available yet, so this
+        falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
+        reachable = probe_url(self.config.url, timeout=2.0)
+        reason = (
+            f"server reachable at {self.config.url} but real GraphQL client not implemented"
+            if reachable else f"no OpenCTI server reachable at {self.config.url}"
+        )
+        if real_client_unavailable("OpenCTI", reason):
+            self._degraded = True
+            self.client = MockOpenCTIClient(self.config)
         self.matcher = ThreatMatcher(self.client)
         self._connected = True
         logger.info(f"Connected to OpenCTI at {self.config.url}")

@@ -28,6 +28,8 @@ import re
 
 logger = logging.getLogger(__name__)
 
+from .._mock_fallback import probe_url, real_client_unavailable
+
 
 class Permission(Enum):
     """Standard permissions."""
@@ -579,10 +581,29 @@ class PermifyAuthorization:
         self.relationships: Optional[RelationshipManager] = None
         self.permissions: Optional[PermissionChecker] = None
         self._connected = False
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
     
     async def connect(self) -> 'PermifyAuthorization':
-        """Connect to Permify."""
-        self.client = MockPermifyClient(self.config)
+        """
+        Connect to Permify (real connection first).
+
+        A real gRPC client implementation is not available yet, so this
+        falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
+        reachable = probe_url(f"http://{self.config.host}:{self.config.port}", timeout=2.0)
+        reason = (
+            f"server reachable at {self.config.host}:{self.config.port} but real gRPC client not implemented"
+            if reachable else f"no Permify server reachable at {self.config.host}:{self.config.port}"
+        )
+        if real_client_unavailable("Permify", reason):
+            self._degraded = True
+            self.client = MockPermifyClient(self.config)
         
         # Load schema
         await self.client.write_schema(PolicySchema.get_schema())

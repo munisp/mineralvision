@@ -33,7 +33,8 @@ try:
     FLUVIO_AVAILABLE = True
 except ImportError:
     FLUVIO_AVAILABLE = False
-    logger.warning("fluvio not installed. Install with: pip install fluvio")
+
+from .._mock_fallback import real_client_unavailable
 
 
 class CompressionType(Enum):
@@ -547,19 +548,33 @@ class FluvioStreaming:
         self.producers: Optional[FluvioProducerManager] = None
         self.consumers: Optional[FluvioConsumerManager] = None
         self._connected = False
-    
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
+
     async def connect(self) -> 'FluvioStreaming':
-        """Connect to Fluvio cluster."""
+        """
+        Connect to Fluvio cluster (real client first).
+
+        Falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
         if FLUVIO_AVAILABLE:
             try:
                 self.client = await Fluvio.connect()
                 logger.info("Connected to Fluvio cluster")
             except Exception as e:
-                logger.warning(f"Failed to connect to Fluvio: {e}, using mock client")
-                self.client = MockFluvioClient()
+                if real_client_unavailable("Fluvio", "cluster connection failed", e):
+                    self._degraded = True
+                    self.client = MockFluvioClient()
         else:
-            self.client = MockFluvioClient()
-        
+            if real_client_unavailable("Fluvio", "fluvio package not installed"):
+                self._degraded = True
+                self.client = MockFluvioClient()
+
         self.topics = FluvioTopicManager(self.client)
         self.producers = FluvioProducerManager(self.client)
         self.consumers = FluvioConsumerManager(self.client)

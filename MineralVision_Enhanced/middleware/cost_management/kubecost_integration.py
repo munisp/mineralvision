@@ -27,6 +27,8 @@ import random
 
 logger = logging.getLogger(__name__)
 
+from .._mock_fallback import probe_url, real_client_unavailable
+
 
 class CostMetricType(Enum):
     """Types of cost metrics."""
@@ -593,10 +595,29 @@ class KubecostIntegration:
         self.analyzer: Optional[CostAnalyzer] = None
         self.budgets: Optional[BudgetManager] = None
         self._connected = False
+        self._degraded = False
+
+    @property
+    def degraded(self) -> bool:
+        """True when running on the explicit in-memory mock fallback."""
+        return self._degraded
     
     async def connect(self) -> 'KubecostIntegration':
-        """Connect to Kubecost."""
-        self.api = MockKubecostAPI(self.config)
+        """
+        Connect to Kubecost (real connection first).
+
+        A real HTTP client implementation is not available yet, so this
+        falls back to the in-memory mock ONLY when
+        MV_ALLOW_MOCK_FALLBACK=true; otherwise raises RuntimeError.
+        """
+        reachable = probe_url(self.config.url, timeout=2.0)
+        reason = (
+            f"server reachable at {self.config.url} but real HTTP client not implemented"
+            if reachable else f"no Kubecost server reachable at {self.config.url}"
+        )
+        if real_client_unavailable("Kubecost", reason):
+            self._degraded = True
+            self.api = MockKubecostAPI(self.config)
         self.analyzer = CostAnalyzer(self.api)
         self.budgets = BudgetManager(self.api)
         
