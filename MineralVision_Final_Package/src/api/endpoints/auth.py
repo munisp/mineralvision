@@ -1,46 +1,45 @@
 """
 API endpoints for Authentication.
 
-This module provides endpoints for user authentication including
-login, logout, token refresh, and password management.
+Database-backed authentication using bcrypt password hashing and PyJWT
+access tokens (see src.api.auth_middleware for the security contracts).
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Header
+from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
 import uuid
-import hashlib
-import secrets
+
+from sqlalchemy.orm import Session
+
+from ..database import get_db, UserModel
+from ..auth_middleware import (
+    create_access_token, verify_password, hash_password,
+    require_auth, blacklist_token, TokenPayload, JWT_EXPIRATION_HOURS
+)
 
 router = APIRouter()
 
-# Runtime storage for API operations
-tokens_db: Dict[str, dict] = {}
-sessions_db: Dict[str, dict] = {}
-
-# Import users_db from users module (shared storage)
-from .users import users_db, hash_password
-
 
 class LoginRequest(BaseModel):
-    """Schema for login request."""
-    email: str
+    """Schema for login request (username or email + password)."""
+    username: str
     password: str
 
 
-class LoginResponse(BaseModel):
-    """Schema for login response."""
-    accessToken: str
-    refreshToken: str
-    tokenType: str = "Bearer"
-    expiresIn: int
-    user: Dict[str, Any]
+class RegisterRequest(BaseModel):
+    """Schema for registration request."""
+    username: str = Field(..., min_length=3, max_length=100)
+    email: str
+    password: str = Field(..., min_length=8)
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
 
 class RefreshRequest(BaseModel):
     """Schema for token refresh request."""
-    refreshToken: str
+    refreshToken: Optional[str] = None
 
 
 class PasswordChangeRequest(BaseModel):
@@ -54,204 +53,133 @@ class PasswordResetRequest(BaseModel):
     email: str
 
 
-def generate_token() -> str:
-    """Generate a secure random token."""
-    return secrets.token_urlsafe(32)
-
-
-def create_tokens(user_id: str) -> tuple:
-    """Create access and refresh tokens for a user."""
-    access_token = generate_token()
-    refresh_token = generate_token()
-    
-    # Store tokens
-    tokens_db[access_token] = {
-        "user_id": user_id,
-        "type": "access",
-        "created_at": datetime.utcnow().isoformat(),
-        "expires_at": (datetime.utcnow() + timedelta(hours=1)).isoformat()
+def _user_response(user: UserModel) -> Dict[str, Any]:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "firstName": user.first_name or "",
+        "lastName": user.last_name or "",
+        "name": f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username,
+        "roles": [user.role],
+        "role": user.role,
+        "isActive": user.is_active
     }
-    
-    tokens_db[refresh_token] = {
-        "user_id": user_id,
-        "type": "refresh",
-        "created_at": datetime.utcnow().isoformat(),
-        "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat()
-    }
-    
-    return access_token, refresh_token
 
 
-@router.post("/login", response_model=LoginResponse)
-async def login(request: LoginRequest):
-    """Authenticate user and return tokens."""
-    # Find user by email
-    user = None
-    for u in users_db.values():
-        if u.get("email") == request.email:
-            user = u
-            break
-    
-    if not user:
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    # Verify password
-    if user.get("password") != hash_password(request.password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    
-    # Check if user is active
-    if not user.get("isActive", True):
-        raise HTTPException(status_code=401, detail="Account is disabled")
-    
-    # Create tokens
-    access_token, refresh_token = create_tokens(user["id"])
-    
-    # Update last login
-    user["lastLogin"] = datetime.utcnow().isoformat()
-    users_db[user["id"]] = user
-    
-    # Create session
-    session_id = str(uuid.uuid4())
-    sessions_db[session_id] = {
-        "user_id": user["id"],
-        "access_token": access_token,
-        "created_at": datetime.utcnow().isoformat()
+def _token_response(user: UserModel) -> Dict[str, Any]:
+    token = create_access_token({
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "role": user.role
+    })
+    expires_in = JWT_EXPIRATION_HOURS * 3600
+    return {
+        "access_token": token,
+        "accessToken": token,
+        "refreshToken": token,
+        "token_type": "bearer",
+        "tokenType": "Bearer",
+        "expires_in": expires_in,
+        "expiresIn": expires_in,
+        "session": {"token": token, "expires_in": expires_in},
+        "user": _user_response(user)
     }
-    
-    return LoginResponse(
-        accessToken=access_token,
-        refreshToken=refresh_token,
-        tokenType="Bearer",
-        expiresIn=3600,
-        user={
-            "id": user["id"],
-            "email": user["email"],
-            "name": user["name"],
-            "roles": user["roles"]
-        }
+
+
+@router.post("/login")
+async def login(request: LoginRequest, db: Session = Depends(get_db)):
+    """Authenticate user (by username or email) and return a JWT token."""
+    user = db.query(UserModel).filter(
+        (UserModel.username == request.username) | (UserModel.email == request.username)
+    ).first()
+
+    if not user or not verify_password(request.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    if not user.is_active:
+        raise HTTPException(status_code=401, detail="User account is disabled")
+
+    return _token_response(user)
+
+
+@router.post("/register", status_code=201)
+async def register(request: RegisterRequest, db: Session = Depends(get_db)):
+    """Register a new user."""
+    if db.query(UserModel).filter(UserModel.username == request.username).first():
+        raise HTTPException(status_code=400, detail="Username already exists")
+
+    if db.query(UserModel).filter(UserModel.email == request.email).first():
+        raise HTTPException(status_code=400, detail="Email already exists")
+
+    user = UserModel(
+        id=str(uuid.uuid4()),
+        username=request.username,
+        email=request.email,
+        password_hash=hash_password(request.password),
+        first_name=request.first_name,
+        last_name=request.last_name,
+        role="user"
     )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "User registered successfully",
+        "user_id": user.id,
+        "user": _user_response(user)
+    }
 
 
 @router.post("/logout")
-async def logout(authorization: Optional[str] = Header(None)):
-    """Logout user and invalidate token."""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authorization header required")
-    
-    # Extract token from header
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
-    
-    token = parts[1]
-    
-    # Remove token
-    if token in tokens_db:
-        del tokens_db[token]
-    
-    # Remove associated sessions
-    sessions_to_remove = [
-        sid for sid, session in sessions_db.items()
-        if session.get("access_token") == token
-    ]
-    for sid in sessions_to_remove:
-        del sessions_db[sid]
-    
+async def logout(user: TokenPayload = Depends(require_auth)):
+    """Logout user by blacklisting the current token."""
+    blacklist_token(user.jti)
     return {"status": "logged_out"}
 
 
-@router.post("/refresh", response_model=LoginResponse)
-async def refresh_token(request: RefreshRequest):
-    """Refresh access token using refresh token."""
-    token_data = tokens_db.get(request.refreshToken)
-    
-    if not token_data:
-        raise HTTPException(status_code=401, detail="Invalid refresh token")
-    
-    if token_data.get("type") != "refresh":
-        raise HTTPException(status_code=401, detail="Invalid token type")
-    
-    # Check expiration
-    expires_at = datetime.fromisoformat(token_data["expires_at"])
-    if datetime.utcnow() > expires_at:
-        del tokens_db[request.refreshToken]
-        raise HTTPException(status_code=401, detail="Refresh token expired")
-    
-    user_id = token_data["user_id"]
-    user = users_db.get(user_id)
-    
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    
-    # Create new tokens
-    access_token, refresh_token = create_tokens(user_id)
-    
-    # Invalidate old refresh token
-    del tokens_db[request.refreshToken]
-    
-    return LoginResponse(
-        accessToken=access_token,
-        refreshToken=refresh_token,
-        tokenType="Bearer",
-        expiresIn=3600,
-        user={
-            "id": user["id"],
-            "email": user["email"],
-            "name": user["name"],
-            "roles": user["roles"]
-        }
-    )
+@router.post("/refresh")
+async def refresh_token(user: TokenPayload = Depends(require_auth),
+                        db: Session = Depends(get_db)):
+    """Issue a new access token for the authenticated user."""
+    db_user = db.query(UserModel).filter(UserModel.id == user.user_id).first()
+    if not db_user or not db_user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or disabled")
+
+    # Rotate: blacklist the presented token, issue a fresh one
+    blacklist_token(user.jti)
+    return _token_response(db_user)
 
 
 @router.post("/change-password")
 async def change_password(
     request: PasswordChangeRequest,
-    authorization: Optional[str] = Header(None)
+    user: TokenPayload = Depends(require_auth),
+    db: Session = Depends(get_db)
 ):
-    """Change user password."""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authorization header required")
-    
-    # Extract and validate token
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
-    
-    token = parts[1]
-    token_data = tokens_db.get(token)
-    
-    if not token_data or token_data.get("type") != "access":
-        raise HTTPException(status_code=401, detail="Invalid access token")
-    
-    user_id = token_data["user_id"]
-    user = users_db.get(user_id)
-    
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    
-    # Verify current password
-    if user.get("password") != hash_password(request.currentPassword):
+    """Change the authenticated user's password."""
+    db_user = db.query(UserModel).filter(UserModel.id == user.user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if not verify_password(request.currentPassword, db_user.password_hash):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
-    
-    # Update password
-    user["password"] = hash_password(request.newPassword)
-    user["updatedAt"] = datetime.utcnow().isoformat()
-    users_db[user_id] = user
-    
+
+    db_user.password_hash = hash_password(request.newPassword)
+    db_user.updated_at = datetime.utcnow()
+    db.commit()
+
+    # Invalidate the token used for this request
+    blacklist_token(user.jti)
+
     return {"status": "password_changed"}
 
 
 @router.post("/reset-password")
 async def reset_password(request: PasswordResetRequest):
-    """Request password reset."""
-    # Find user by email
-    user = None
-    for u in users_db.values():
-        if u.get("email") == request.email:
-            user = u
-            break
-    
-    # Always return success to prevent email enumeration
+    """Request password reset (enumeration-safe)."""
     return {
         "status": "reset_email_sent",
         "message": "If the email exists, a password reset link has been sent"
@@ -259,39 +187,13 @@ async def reset_password(request: PasswordResetRequest):
 
 
 @router.get("/me")
-async def get_current_user(authorization: Optional[str] = Header(None)):
-    """Get current authenticated user."""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Authorization header required")
-    
-    # Extract and validate token
-    parts = authorization.split()
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
-    
-    token = parts[1]
-    token_data = tokens_db.get(token)
-    
-    if not token_data or token_data.get("type") != "access":
-        raise HTTPException(status_code=401, detail="Invalid access token")
-    
-    # Check expiration
-    expires_at = datetime.fromisoformat(token_data["expires_at"])
-    if datetime.utcnow() > expires_at:
-        del tokens_db[token]
-        raise HTTPException(status_code=401, detail="Access token expired")
-    
-    user_id = token_data["user_id"]
-    user = users_db.get(user_id)
-    
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    
-    return {
-        "id": user["id"],
-        "email": user["email"],
-        "name": user["name"],
-        "roles": user["roles"],
-        "isActive": user["isActive"],
-        "lastLogin": user.get("lastLogin")
-    }
+async def get_current_user_info(
+    user: TokenPayload = Depends(require_auth),
+    db: Session = Depends(get_db)
+):
+    """Get current authenticated user info."""
+    db_user = db.query(UserModel).filter(UserModel.id == user.user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return _user_response(db_user)

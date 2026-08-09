@@ -1,16 +1,21 @@
 """
 API endpoints for User management.
 
-This module provides CRUD operations for users and role management,
-integrating with the RBAC module.
+Database-backed CRUD operations for users and role management,
+integrating with the RBAC module. Passwords are hashed with bcrypt
+(see src.api.auth_middleware).
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
 from datetime import datetime
 import uuid
-import hashlib
+
+from sqlalchemy.orm import Session
+
+from ..database import get_db, UserModel
+from ..auth_middleware import hash_password, require_role, TokenPayload
 
 # Import RBAC module
 from ..auth.rbac import (
@@ -25,9 +30,6 @@ router = APIRouter()
 
 # Initialize RBAC manager
 rbac_manager = create_rbac_manager()
-
-# Runtime storage for API operations
-users_db: Dict[str, dict] = {}
 
 
 class UserCreate(BaseModel):
@@ -66,9 +68,18 @@ class RoleUpdateRequest(BaseModel):
     roles: List[str]
 
 
-def hash_password(password: str) -> str:
-    """Hash a password using SHA-256."""
-    return hashlib.sha256(password.encode()).hexdigest()
+def _to_response(user: UserModel) -> UserResponse:
+    name = f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=name,
+        roles=[user.role],
+        isActive=user.is_active,
+        createdAt=user.created_at.isoformat(),
+        updatedAt=user.updated_at.isoformat(),
+        lastLogin=None
+    )
 
 
 @router.get("", response_model=List[UserResponse])
@@ -76,170 +87,175 @@ async def list_users(
     role: Optional[str] = Query(None, description="Filter by role"),
     isActive: Optional[bool] = Query(None, description="Filter by active status"),
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    admin: TokenPayload = Depends(require_role(["admin"]))
 ):
-    """List all users with optional filtering."""
-    users = list(users_db.values())
-    
-    # Apply filters
+    """List all users with optional filtering (admin only)."""
+    query = db.query(UserModel)
     if role:
-        users = [u for u in users if role in u.get("roles", [])]
+        query = query.filter(UserModel.role == role)
     if isActive is not None:
-        users = [u for u in users if u.get("isActive") == isActive]
-    
-    # Apply pagination
-    users = users[offset:offset + limit]
-    
-    # Remove password from response
-    return [UserResponse(**{k: v for k, v in u.items() if k != "password"}) for u in users]
+        query = query.filter(UserModel.is_active == isActive)
+    users = query.offset(offset).limit(limit).all()
+    return [_to_response(u) for u in users]
 
 
 @router.get("/{user_id}", response_model=UserResponse)
-async def get_user(user_id: str):
+async def get_user(user_id: str, db: Session = Depends(get_db)):
     """Get a specific user by ID."""
-    if user_id not in users_db:
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-    
-    user = users_db[user_id]
-    return UserResponse(**{k: v for k, v in user.items() if k != "password"})
+    return _to_response(user)
 
 
 @router.post("", response_model=UserResponse, status_code=201)
-async def create_user(user: UserCreate):
-    """Create a new user."""
-    # Check for duplicate email
-    for existing in users_db.values():
-        if existing.get("email") == user.email:
-            raise HTTPException(status_code=400, detail="Email already registered")
-    
-    user_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
-    
-    user_data = {
-        "id": user_id,
-        "email": user.email,
-        "name": user.name,
-        "password": hash_password(user.password),
-        "roles": user.roles,
-        "isActive": True,
-        "createdAt": now,
-        "updatedAt": now,
-        "lastLogin": None,
-        "metadata": user.metadata or {}
-    }
-    
+async def create_user(
+    user: UserCreate,
+    db: Session = Depends(get_db),
+    admin: TokenPayload = Depends(require_role(["admin"]))
+):
+    """Create a new user (admin only)."""
+    if db.query(UserModel).filter(UserModel.email == user.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    role = user.roles[0] if user.roles else "viewer"
+    name_parts = user.name.split(" ", 1)
+
+    db_user = UserModel(
+        id=str(uuid.uuid4()),
+        username=user.email,
+        email=user.email,
+        password_hash=hash_password(user.password),
+        first_name=name_parts[0] if name_parts else "",
+        last_name=name_parts[1] if len(name_parts) > 1 else "",
+        role=role,
+        is_active=True
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+
     # Register with RBAC manager
     try:
         rbac_manager.create_user(
-            user_id=user_id,
-            email=user.email,
+            user_id=db_user.id,
+            email=db_user.email,
             name=user.name,
             roles=user.roles
         )
     except Exception:
-        pass  # RBAC registration is optional
-    
-    users_db[user_id] = user_data
-    return UserResponse(**{k: v for k, v in user_data.items() if k != "password"})
+        pass  # RBAC registration is best-effort
+
+    return _to_response(db_user)
 
 
 @router.put("/{user_id}", response_model=UserResponse)
-async def update_user(user_id: str, user: UserUpdate):
-    """Update an existing user."""
-    if user_id not in users_db:
+async def update_user(
+    user_id: str,
+    user: UserUpdate,
+    db: Session = Depends(get_db),
+    admin: TokenPayload = Depends(require_role(["admin"]))
+):
+    """Update an existing user (admin only)."""
+    db_user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not db_user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-    
-    existing = users_db[user_id]
+
     update_data = user.model_dump(exclude_unset=True)
-    
-    for key, value in update_data.items():
-        if value is not None:
-            if key == "password":
-                existing["password"] = hash_password(value)
-            else:
-                existing[key] = value
-    
-    existing["updatedAt"] = datetime.utcnow().isoformat()
-    users_db[user_id] = existing
-    
-    return UserResponse(**{k: v for k, v in existing.items() if k != "password"})
+
+    if update_data.get("email"):
+        db_user.email = update_data["email"]
+        db_user.username = update_data["email"]
+    if update_data.get("name"):
+        parts = update_data["name"].split(" ", 1)
+        db_user.first_name = parts[0]
+        db_user.last_name = parts[1] if len(parts) > 1 else ""
+    if update_data.get("password"):
+        db_user.password_hash = hash_password(update_data["password"])
+    if update_data.get("roles"):
+        db_user.role = update_data["roles"][0]
+    if update_data.get("isActive") is not None:
+        db_user.is_active = update_data["isActive"]
+
+    db_user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(db_user)
+
+    return _to_response(db_user)
 
 
 @router.delete("/{user_id}", status_code=204)
-async def delete_user(user_id: str):
-    """Delete a user."""
-    if user_id not in users_db:
+async def delete_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    admin: TokenPayload = Depends(require_role(["admin"]))
+):
+    """Delete a user (admin only)."""
+    db_user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not db_user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-    
-    del users_db[user_id]
+
+    db.delete(db_user)
+    db.commit()
     return None
 
 
 @router.put("/{user_id}/roles", response_model=UserResponse)
-async def update_user_roles(user_id: str, request: RoleUpdateRequest):
-    """Update user roles."""
-    if user_id not in users_db:
+async def update_user_roles(
+    user_id: str,
+    request: RoleUpdateRequest,
+    db: Session = Depends(get_db),
+    admin: TokenPayload = Depends(require_role(["admin"]))
+):
+    """Update user roles (admin only)."""
+    db_user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not db_user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-    
-    existing = users_db[user_id]
-    existing["roles"] = request.roles
-    existing["updatedAt"] = datetime.utcnow().isoformat()
-    
+
+    if request.roles:
+        db_user.role = request.roles[0]
+    db_user.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(db_user)
+
     # Update RBAC manager
     try:
         rbac_manager.update_user_roles(user_id, request.roles)
     except Exception:
         pass
-    
-    users_db[user_id] = existing
-    return UserResponse(**{k: v for k, v in existing.items() if k != "password"})
+
+    return _to_response(db_user)
 
 
 @router.get("/{user_id}/permissions")
-async def get_user_permissions(user_id: str):
+async def get_user_permissions(user_id: str, db: Session = Depends(get_db)):
     """Get all permissions for a user."""
-    if user_id not in users_db:
+    db_user = db.query(UserModel).filter(UserModel.id == user_id).first()
+    if not db_user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
-    
-    user = users_db[user_id]
-    
+
     try:
         permissions = rbac_manager.get_user_permissions(user_id)
-        return {
-            "userId": user_id,
-            "roles": user["roles"],
-            "permissions": permissions
-        }
+        if permissions:
+            return {
+                "userId": user_id,
+                "roles": [db_user.role],
+                "permissions": permissions
+            }
     except Exception:
-        # Return default permissions based on roles
-        default_permissions = {
-            "admin": ["read", "write", "delete", "admin"],
-            "editor": ["read", "write"],
-            "viewer": ["read"]
-        }
-        
-        all_permissions = set()
-        for role in user["roles"]:
-            all_permissions.update(default_permissions.get(role, ["read"]))
-        
-        return {
-            "userId": user_id,
-            "roles": user["roles"],
-            "permissions": list(all_permissions)
-        }
+        pass
 
-
-@router.get("/roles/available")
-async def list_available_roles():
-    """List all available roles."""
+    # Derive permissions from the user's role
+    default_permissions = {
+        "admin": ["read", "write", "delete", "admin"],
+        "editor": ["read", "write"],
+        "viewer": ["read"],
+        "user": ["read"]
+    }
     return {
-        "roles": [
-            {"name": "admin", "description": "Full system access"},
-            {"name": "project_manager", "description": "Manage projects and team members"},
-            {"name": "geologist", "description": "Access to geology and drillhole data"},
-            {"name": "geostatistician", "description": "Access to geostatistics and modeling"},
-            {"name": "geophysicist", "description": "Access to geophysics and inversion"},
-            {"name": "editor", "description": "Read and write access"},
-            {"name": "viewer", "description": "Read-only access"}
-        ]
+        "userId": user_id,
+        "roles": [db_user.role],
+        "permissions": default_permissions.get(db_user.role, ["read"])
     }

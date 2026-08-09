@@ -12,18 +12,30 @@ import os
 import json
 import numpy as np
 import pandas as pd
-import geopandas as gpd
-import torch
 from pydantic import BaseModel
 import uuid
 import shutil
 import tempfile
 from datetime import datetime
 
-from ..ml.predictive_modeling.mineral_deposit_prediction import (
-    MineralDepositPredictionService,
-    MineralDepositDataset
-)
+# Heavy ML dependencies (torch, geopandas, mlflow, ...) are optional.
+# The API boots without them; ML endpoints degrade with HTTP 503.
+try:
+    import geopandas as gpd
+    import torch
+    from ..ml.predictive_modeling.mineral_deposit_prediction import (
+        MineralDepositPredictionService,
+        MineralDepositDataset
+    )
+    PREDICTIVE_MODELING_AVAILABLE = True
+    _PREDICTIVE_MODELING_ERROR: Optional[str] = None
+except ImportError as exc:  # pragma: no cover - depends on optional deps
+    gpd = None
+    torch = None
+    MineralDepositPredictionService = None
+    MineralDepositDataset = None
+    PREDICTIVE_MODELING_AVAILABLE = False
+    _PREDICTIVE_MODELING_ERROR = str(exc)
 
 # Create router
 router = APIRouter(
@@ -41,13 +53,30 @@ MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "")
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# Initialize prediction service
-prediction_service = MineralDepositPredictionService(
-    model_path=os.path.join(MODEL_DIR, "latest_model"),
-    data_dir=DATA_DIR,
-    mlflow_tracking_uri=MLFLOW_TRACKING_URI,
-    uncertainty_estimation=True
+# Initialize prediction service (None when heavy ML deps are not installed)
+prediction_service = (
+    MineralDepositPredictionService(
+        model_path=os.path.join(MODEL_DIR, "latest_model"),
+        data_dir=DATA_DIR,
+        mlflow_tracking_uri=MLFLOW_TRACKING_URI,
+        uncertainty_estimation=True
+    )
+    if PREDICTIVE_MODELING_AVAILABLE else None
 )
+
+
+def _require_prediction_service():
+    """Raise HTTP 503 when the ML stack is not installed."""
+    if prediction_service is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Predictive modeling is unavailable: optional ML dependencies "
+                f"are not installed ({_PREDICTIVE_MODELING_ERROR}). "
+                "Install requirements-ml.txt to enable this feature."
+            )
+        )
+    return prediction_service
 
 # Pydantic models for request/response validation
 class PredictionRequest(BaseModel):
@@ -106,6 +135,7 @@ async def predict(request: PredictionRequest):
     Returns:
         Prediction response with prediction value and optional uncertainty
     """
+    _require_prediction_service()
     try:
         features = np.array(request.features, dtype=np.float32).reshape(1, -1)
         
@@ -148,6 +178,7 @@ async def train_model(
     Returns:
         Training response with job ID and status
     """
+    _require_prediction_service()
     # Generate a job ID
     job_id = str(uuid.uuid4())
     
@@ -287,14 +318,15 @@ async def update_from_validation(
 ):
     """
     Update a model based on field validation results.
-    
+
     Args:
         background_tasks: FastAPI background tasks
         request: Validation request with new data and validation results
-        
+
     Returns:
         Validation response with job ID and status
     """
+    _require_prediction_service()
     # Generate a job ID
     job_id = str(uuid.uuid4())
     

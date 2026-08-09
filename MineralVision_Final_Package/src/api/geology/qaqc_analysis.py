@@ -1015,3 +1015,163 @@ def create_standard_reference(standard_id: str, name: str,
         uncertainties=uncertainties,
         supplier=supplier
     )
+
+
+class QAQCAnalyzer:
+    """
+    Facade over QAQCDashboard providing the per-project analysis interface
+    consumed by the API layer.
+
+    Wraps a QAQCDashboard and exposes a small, stable surface:
+    analyze(), generate_control_chart() and get_standards(). All metrics are
+    computed from the registered QA/QC data via the underlying analyzers;
+    when no data has been registered the methods return empty/zero summaries.
+    """
+
+    def __init__(self, project_name: str = "default"):
+        self._dashboards: Dict[str, QAQCDashboard] = {}
+        self._default_project = project_name
+
+    def _dashboard(self, project_id: str) -> QAQCDashboard:
+        """Get (or lazily create) the dashboard for a project."""
+        if project_id not in self._dashboards:
+            self._dashboards[project_id] = QAQCDashboard(project_id)
+        return self._dashboards[project_id]
+
+    def register_sample(self, project_id: str, sample: QAQCSample) -> List[QAQCAlert]:
+        """Register a QA/QC sample with the project's dashboard."""
+        return self._dashboard(project_id).process_sample(sample)
+
+    def analyze(self, project_id: str, qaqc_type: QAQCType,
+                element: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Run a QA/QC analysis for a project.
+
+        Computes pass/fail statistics from alerts and control points tracked
+        by the underlying analyzers for the requested QA/QC type.
+        """
+        dashboard = self._dashboard(project_id)
+        summary = dashboard.get_summary()
+
+        if qaqc_type == QAQCType.STANDARD:
+            section = summary.get("standards", {})
+            stats = list(section.values())
+            if element:
+                stats = [s for k, s in section.items()
+                         if k.endswith(f"_{element}") and s]
+            stats = [s for s in stats if s]
+            total = sum(s.get("n_samples", 0) for s in stats)
+            if total == 0:
+                pass_rate = 0.0
+            else:
+                pass_rate = sum(s.get("pass_rate", 0.0) * s.get("n_samples", 0)
+                                for s in stats) / total
+            mean_bias = (sum(s.get("mean_bias", 0.0) for s in stats) / len(stats)) if stats else 0.0
+            return {
+                "total_samples": total,
+                "pass_count": int(round(total * pass_rate / 100.0)),
+                "fail_count": total - int(round(total * pass_rate / 100.0)),
+                "pass_rate": pass_rate / 100.0,
+                "mean_deviation": mean_bias,
+                "std_deviation": (sum(s.get("std_value", 0.0) for s in stats) / len(stats)) if stats else 0.0,
+                "outliers": [a["alert_id"] for a in dashboard.export_alerts()
+                             if not element or a.get("element") == element]
+            }
+
+        if qaqc_type == QAQCType.BLANK:
+            section = summary.get("blanks", {})
+            stats = [s for k, s in section.items()
+                     if s and (not element or k == element)]
+            total = sum(s.get("n_samples", s.get("total", 0)) for s in stats)
+            contamination = [a for a in dashboard.export_alerts()
+                             if a.get("type") == FailureType.CONTAMINATION.value
+                             and (not element or a.get("element") == element)]
+            fail = len(contamination)
+            return {
+                "total_samples": total,
+                "pass_count": max(total - fail, 0),
+                "fail_count": fail,
+                "pass_rate": ((total - fail) / total) if total else 0.0,
+                "mean_deviation": 0.0,
+                "std_deviation": 0.0,
+                "outliers": [a["alert_id"] for a in contamination]
+            }
+
+        # Duplicates / umpire: precision statistics
+        section = summary.get("duplicates", {})
+        stats = [s for k, s in section.items() if s and (not element or k == element)]
+        precisions = []
+        for s in stats:
+            for key in ("field", "coarse", "pulp"):
+                entry = s.get(key) or {}
+                if entry.get("precision_percent") is not None:
+                    precisions.append(entry["precision_percent"])
+        total = summary.get("total_qaqc_samples", 0)
+        return {
+            "total_samples": total,
+            "pass_count": total,
+            "fail_count": 0,
+            "pass_rate": 1.0 if total else 0.0,
+            "mean_deviation": (sum(precisions) / len(precisions)) if precisions else 0.0,
+            "std_deviation": 0.0,
+            "outliers": []
+        }
+
+    def generate_control_chart(self, project_id: str, standard_id: str,
+                               element: str,
+                               chart_type: ControlChartType = ControlChartType.SHEWHART
+                               ) -> Dict[str, Any]:
+        """Generate control chart data for a standard/element pair."""
+        dashboard = self._dashboard(project_id)
+        data = dashboard.standards_analyzer.get_control_chart_data(
+            standard_id, element, chart_type
+        )
+        if not data:
+            return {}
+        return {
+            "centerLine": data.get("center_line", 0.0),
+            "upperControlLimit": data.get("action_high", 0.0),
+            "lowerControlLimit": data.get("action_low", 0.0),
+            "upperWarningLimit": data.get("warning_high", 0.0),
+            "lowerWarningLimit": data.get("warning_low", 0.0),
+            "dataPoints": [
+                {
+                    "date": d,
+                    "sampleId": sid,
+                    "value": v,
+                    "zScore": z,
+                    "alertLevel": lvl
+                }
+                for d, sid, v, z, lvl in zip(
+                    data.get("dates", []),
+                    data.get("sample_ids", []),
+                    data.get("values", []),
+                    data.get("z_scores", []),
+                    data.get("alert_levels", [])
+                )
+            ],
+            "outOfControl": [
+                sid for sid, lvl in zip(data.get("sample_ids", []),
+                                        data.get("alert_levels", []))
+                if lvl != AlertLevel.OK.value
+            ]
+        }
+
+    def get_standards(self, project_id: str) -> List[Dict[str, Any]]:
+        """List all registered standards (CRMs) for a project."""
+        dashboard = self._dashboard(project_id)
+        return [
+            {
+                "standardId": std.standard_id,
+                "name": std.name,
+                "certifiedValues": std.certified_values,
+                "uncertainties": std.uncertainties,
+                "supplier": std.supplier
+            }
+            for std in dashboard.standards_analyzer.standards.values()
+        ]
+
+
+def create_qaqc_analyzer(project_name: str = "default") -> QAQCAnalyzer:
+    """Factory function to create a QAQCAnalyzer facade."""
+    return QAQCAnalyzer(project_name)

@@ -11,6 +11,10 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 import uuid
 
+from sqlalchemy.orm import Session
+
+from ..database import get_db, QAQCRecordModel
+
 # Import the QA/QC analysis module
 from ..geology.qaqc_analysis import (
     QAQCAnalyzer,
@@ -24,8 +28,7 @@ router = APIRouter()
 # Initialize QA/QC analyzer
 qaqc_analyzer = create_qaqc_analyzer()
 
-# Runtime storage for API operations
-qaqc_results_db: Dict[str, dict] = {}
+
 
 
 class QAQCAnalyzeRequest(BaseModel):
@@ -58,29 +61,43 @@ class ControlChartRequest(BaseModel):
     chartType: str = Field(default="x_bar")
 
 
-@router.get("", response_model=List[QAQCResult])
+@router.get("")
 async def list_qaqc_results(
     projectId: Optional[str] = Query(None, description="Filter by project ID"),
     type: Optional[str] = Query(None, description="Filter by QA/QC type"),
-    status: Optional[str] = Query(None, description="Filter by status"),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
+    db: Session = Depends(get_db)
 ):
-    """List all QA/QC results with optional filtering."""
-    results = list(qaqc_results_db.values())
-    
-    # Apply filters
+    """List all QA/QC records with optional filtering."""
+    query = db.query(QAQCRecordModel)
     if projectId:
-        results = [r for r in results if r.get("projectId") == projectId]
+        query = query.filter(QAQCRecordModel.project_id == projectId)
     if type:
-        results = [r for r in results if r.get("type") == type]
-    if status:
-        results = [r for r in results if r.get("status") == status]
-    
-    # Apply pagination
-    results = results[offset:offset + limit]
-    
-    return [QAQCResult(**r) for r in results]
+        query = query.filter(QAQCRecordModel.qc_type == type)
+    records = query.all()
+
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "projectId": r.project_id,
+                "sampleId": r.sample_id,
+                "qcType": r.qc_type,
+                "expectedValue": r.expected_value,
+                "actualValue": r.actual_value,
+                "tolerance": r.tolerance,
+                "passed": r.passed,
+                "notes": r.notes,
+                "createdAt": r.created_at.isoformat()
+            }
+            for r in records
+        ],
+        "total": len(records),
+        "summary": {
+            "standards": len([r for r in records if r.qc_type == "standard"]),
+            "blanks": len([r for r in records if r.qc_type == "blank"]),
+            "duplicates": len([r for r in records if r.qc_type == "duplicate"])
+        }
+    }
 
 
 @router.post("/analyze")
@@ -91,7 +108,7 @@ async def analyze_qaqc(request: QAQCAnalyzeRequest):
         qaqc_type_map = {
             "standards": QAQCType.STANDARD,
             "blanks": QAQCType.BLANK,
-            "duplicates": QAQCType.DUPLICATE,
+            "duplicates": QAQCType.FIELD_DUPLICATE,
             "umpire": QAQCType.UMPIRE
         }
         
@@ -149,8 +166,8 @@ async def get_control_chart(
     try:
         # Map string type to enum
         chart_type_map = {
-            "x_bar": ControlChartType.X_BAR,
-            "range": ControlChartType.RANGE,
+            "x_bar": ControlChartType.SHEWHART,
+            "range": ControlChartType.MOVING_RANGE,
             "cusum": ControlChartType.CUSUM,
             "ewma": ControlChartType.EWMA
         }
@@ -214,37 +231,33 @@ async def list_standards(project_id: str):
 
 
 @router.get("/summary/{project_id}")
-async def get_qaqc_summary(project_id: str):
+async def get_qaqc_summary(project_id: str, db: Session = Depends(get_db)):
     """Get QA/QC summary for a project."""
+    records = db.query(QAQCRecordModel).filter(
+        QAQCRecordModel.project_id == project_id
+    ).all()
+
+    def _section(qc_type: str) -> Dict[str, Any]:
+        section = [r for r in records if r.qc_type == qc_type]
+        passed = len([r for r in section if r.passed])
+        total = len(section)
+        return {
+            "total": total,
+            "pass": passed,
+            "fail": total - passed,
+            "passRate": (passed / total) if total else 0.0
+        }
+
+    summary = {
+        "standards": _section("standard"),
+        "blanks": _section("blank"),
+        "duplicates": {**_section("duplicate"), "meanRPD": 0.0},
+        "umpire": _section("umpire")
+    }
+
     return {
         "projectId": project_id,
-        "summary": {
-            "standards": {
-                "total": 0,
-                "pass": 0,
-                "fail": 0,
-                "passRate": 0.0
-            },
-            "blanks": {
-                "total": 0,
-                "pass": 0,
-                "fail": 0,
-                "passRate": 0.0
-            },
-            "duplicates": {
-                "total": 0,
-                "pass": 0,
-                "fail": 0,
-                "passRate": 0.0,
-                "meanRPD": 0.0
-            },
-            "umpire": {
-                "total": 0,
-                "pass": 0,
-                "fail": 0,
-                "passRate": 0.0
-            }
-        },
-        "overallStatus": "no_data",
+        "summary": summary,
+        "overallStatus": "ok" if records else "no_data",
         "timestamp": datetime.utcnow().isoformat()
     }

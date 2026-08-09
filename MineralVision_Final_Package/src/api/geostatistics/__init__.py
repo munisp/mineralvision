@@ -9,7 +9,6 @@ Provides comprehensive geostatistical analysis capabilities including:
 """
 
 from .variography import (
-    VariogramModelType,
     DirectionDefinition,
     LagBin,
     ExperimentalVariogram,
@@ -43,7 +42,6 @@ from .kriging import (
 from .block_model import (
     BlockModelType,
     EstimationMethod,
-    ClassificationCategory,
     ReserveCategory,
     Block,
     BlockModel,
@@ -73,8 +71,6 @@ from .grade_shells import (
 )
 
 __all__ = [
-    # Variography
-    "VariogramModelType",
     "DirectionDefinition",
     "LagBin",
     "ExperimentalVariogram",
@@ -85,7 +81,6 @@ __all__ = [
     "CrossVariogramCalculator",
     "VariographyWorkflow",
     "create_variography_workflow",
-    # Kriging
     "KrigingType",
     "DriftType",
     "SearchEllipsoid",
@@ -101,10 +96,8 @@ __all__ = [
     "Cokriging",
     "KrigingWorkflow",
     "create_kriging_workflow",
-    # Block Model
     "BlockModelType",
     "EstimationMethod",
-    "ClassificationCategory",
     "ReserveCategory",
     "Block",
     "BlockModel",
@@ -114,7 +107,6 @@ __all__ = [
     "BlockModelIO",
     "BlockModelWorkflow",
     "create_block_model_workflow",
-    # Grade Shells
     "ShellMethod",
     "SurfaceType",
     "Point3D",

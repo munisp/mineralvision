@@ -7,438 +7,139 @@ This module provides comprehensive ML capabilities for mineral exploration inclu
 - NLP extraction from geological reports
 - Dataset registry and benchmarking
 - Spatially-aware evaluation metrics
+
+Exports are loaded lazily (PEP 562) because most submodules require optional
+heavy ML/geospatial dependencies (torch, xarray, ...). Importing this package
+itself is always safe; accessing an export imports its submodule on demand.
 """
 
-from .prospectivity_workflow import (
-    # Enums
-    FeatureType,
-    ValidationStrategy,
-    ProspectivityModel,
-    
-    # Data classes
-    RasterLayer,
-    TrainingPoint,
-    ProspectivityDataset,
-    
-    # Cross-validation
-    SpatialBlockCV,
-    SpatialBufferCV,
-    
-    # Feature generation
-    FeatureGenerator,
-    
-    # NLP
-    GeologicalNLPExtractor,
-    
-    # Metrics
-    SpatialMetrics,
-    
-    # Registry
-    DatasetRegistry,
-    
-    # Pipeline
-    ProspectivityPipeline,
-    
-    # Factory functions
-    create_prospectivity_pipeline,
-    create_benchmark_dataset
-)
+import importlib
 
-from .gold_exploration import (
-    # Enums
-    GoldDepositType,
-    AlterationType,
-    RegolithType,
-    
-    # Data classes
-    GeochemSample,
-    GoldOccurrence,
-    StructuralFeature,
-    
-    # Analysis modules
-    GoldPathfinderElements,
-    AlterationIndices,
-    RegolithModel,
-    StructuralComplexity,
-    GoldDepositPriors,
-    
-    # Pipeline
-    GoldExplorationPipeline,
-    
-    # Factory functions
-    create_gold_exploration_pipeline,
-    create_synthetic_gold_dataset
-)
+# export name -> submodule
+_EXPORTS = {
+    # prospectivity_workflow
+    "ValidationStrategy": "prospectivity_workflow",
+    "ProspectivityModel": "prospectivity_workflow",
+    "TrainingPoint": "prospectivity_workflow",
+    "ProspectivityDataset": "prospectivity_workflow",
+    "SpatialBufferCV": "prospectivity_workflow",
+    "create_benchmark_dataset": "prospectivity_workflow",
+    # gold_exploration
+    "AlterationType": "gold_exploration",
+    "RegolithType": "gold_exploration",
+    "GoldOccurrence": "gold_exploration",
+    "StructuralFeature": "gold_exploration",
+    "AlterationIndices": "gold_exploration",
+    "RegolithModel": "gold_exploration",
+    "StructuralComplexity": "gold_exploration",
+    "GoldDepositPriors": "gold_exploration",
+    "create_synthetic_gold_dataset": "gold_exploration",
+    # lithium_exploration
+    "LithiumMineral": "lithium_exploration",
+    "BrineType": "lithium_exploration",
+    "WellData": "lithium_exploration",
+    "PegmatiteSample": "lithium_exploration",
+    "BrineChemistry": "lithium_exploration",
+    "HydrogeologyModel": "lithium_exploration",
+    "ClayLithiumAnalysis": "lithium_exploration",
+    "LithiumDepositPriors": "lithium_exploration",
+    "create_synthetic_lithium_dataset": "lithium_exploration",
+    # uncover_ml
+    "UncoverMLPipeline": "uncover_ml",
+    "ProspectivityWorkflow": "uncover_ml",
+    "FeatureEngineering": "uncover_ml",
+    "ModelEnsemble": "uncover_ml",
+    "UncertaintyQuantification": "uncover_ml",
+    "RasterStack": "uncover_ml",
+    "TrainingData": "uncover_ml",
+    "PredictionResult": "uncover_ml",
+    "FeatureScale": "uncover_ml",
+    "AggregationType": "uncover_ml",
+    "ModelType": "uncover_ml",
+    # torchgeo_models
+    "GeoFoundationModel": "torchgeo_models",
+    "SatelliteImageProcessor": "torchgeo_models",
+    "UAVImageProcessor": "torchgeo_models",
+    "PretrainedBackbone": "torchgeo_models",
+    "FoundationModelType": "torchgeo_models",
+    "ImageryType": "torchgeo_models",
+    "TaskType": "torchgeo_models",
+    "ImageBatch": "torchgeo_models",
+    "ModelOutput": "torchgeo_models",
+    "create_geo_foundation_model": "torchgeo_models",
+    # spatial_cv
+    "SpatialCrossValidator": "spatial_cv",
+    "BlockCV": "spatial_cv",
+    "BufferedLeaveOneOut": "spatial_cv",
+    "SpatialKFold": "spatial_cv",
+    "CVStrategy": "spatial_cv",
+    "CVFold": "spatial_cv",
+    "CVResult": "spatial_cv",
+    "validate_spatial_model": "spatial_cv",
+    # uncertainty_quantification
+    "UncertaintyType": "uncertainty_quantification",
+    "ConfidenceLevel": "uncertainty_quantification",
+    "SensitivityResult": "uncertainty_quantification",
+    "CalibrationResult": "uncertainty_quantification",
+    "MCDropoutEstimator": "uncertainty_quantification",
+    "DeepEnsembleEstimator": "uncertainty_quantification",
+    "QuantileRegressionEstimator": "uncertainty_quantification",
+    "SobolSensitivityAnalyzer": "uncertainty_quantification",
+    "CalibrationAssessor": "uncertainty_quantification",
+    "UncertaintyPropagator": "uncertainty_quantification",
+    "UncertaintyQuantificationPipeline": "uncertainty_quantification",
+    "create_uq_pipeline": "uncertainty_quantification",
+    "estimate_grid_uncertainty": "uncertainty_quantification",
+    # mlops_hardening
+    "ModelStage": "mlops_hardening",
+    "DatasetType": "mlops_hardening",
+    "DriftType": "mlops_hardening",
+    "DatasetVersion": "mlops_hardening",
+    "ExperimentRun": "mlops_hardening",
+    "ModelCard": "mlops_hardening",
+    "DriftAlert": "mlops_hardening",
+    "DatasetVersionManager": "mlops_hardening",
+    "ExperimentTracker": "mlops_hardening",
+    "DriftMonitor": "mlops_hardening",
+    "EvaluationSuite": "mlops_hardening",
+    "MLOpsPipeline": "mlops_hardening",
+    "create_mlops_pipeline": "mlops_hardening",
+    "create_experiment_tracker": "mlops_hardening",
+    "create_drift_monitor": "mlops_hardening",
+    # foundation_models
+    "DataModality": "foundation_models",
+    "PretrainingTask": "foundation_models",
+    "FineTuningStrategy": "foundation_models",
+    "ModalityConfig": "foundation_models",
+    "PretrainingConfig": "foundation_models",
+    "FineTuningConfig": "foundation_models",
+    "ModelCheckpoint": "foundation_models",
+    "ModalityAdapter": "foundation_models",
+    "MultispectralAdapter": "foundation_models",
+    "GeophysicsAdapter": "foundation_models",
+    "TextAdapter": "foundation_models",
+    "PretrainingPipeline": "foundation_models",
+    "FineTuningPipeline": "foundation_models",
+    "GeoscienceFoundationModel": "foundation_models",
+    "FoundationModelRegistry": "foundation_models",
+    "create_foundation_model": "foundation_models",
+    "create_pretraining_config": "foundation_models",
+    "create_finetuning_config": "foundation_models",
+}
 
-from .lithium_exploration import (
-    # Enums
-    LithiumDepositType,
-    LithiumMineral,
-    BrineType,
-    
-    # Data classes
-    BrineSample,
-    WellData,
-    PegmatiteSample,
-    
-    # Analysis modules
-    LithiumPathfinderElements,
-    BrineChemistry,
-    HydrogeologyModel,
-    ClayLithiumAnalysis,
-    LithiumDepositPriors,
-    
-    # Pipeline
-    LithiumExplorationPipeline,
-    
-    # Factory functions
-    create_lithium_exploration_pipeline,
-    create_synthetic_lithium_dataset
-)
+__all__ = sorted(_EXPORTS)
 
-from .soil_suitability import (
-    # Enums
-    CropType,
-    SuitabilityClass,
-    SoilTextureClass,
-    DrainageClass,
-    
-    # Data classes
-    SoilSample,
-    ClimateData,
-    TopographyData,
-    
-    # Analysis modules
-    CropRequirements,
-    SoilSuitabilityScorer,
-    RemediationRecommender,
-    
-    # Pipeline
-    SoilSuitabilityPipeline,
-    
-    # Factory functions
-    create_soil_suitability_pipeline,
-    create_synthetic_soil_dataset
-)
 
-from .advanced_soil_assessment import (
-    # Enums
-    HazardSeverity,
-    ToxicityType,
-    DiseaseRiskType,
-    PhosphorusMethod,
-    
-    # Data classes
-    SoilPhysicalConstraints,
-    ToxicityHazard,
-    NutrientBudget,
-    UncertaintyEstimate,
-    WaterBalanceResult,
-    DiseaseRiskAssessment,
-    EconomicAnalysis,
-    
-    # Assessors
-    ToxicityHazardAssessor,
-    NutrientBudgetCalculator,
-    PhysicalConstraintAssessor,
-    UncertaintyQuantifier,
-    WaterBalanceCalculator,
-    DiseaseRiskAssessor,
-    EconomicAnalyzer,
-    SpatialInterpolator,
-    
-    # Advanced Pipeline
-    AdvancedSoilSuitabilityPipeline,
-    
-    # Factory functions
-    create_advanced_soil_pipeline
-)
+def __getattr__(name: str):
+    """Lazily import the submodule providing an export (PEP 562)."""
+    module_name = _EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = importlib.import_module(f".{module_name}", __name__)
+    value = getattr(module, name)
+    globals()[name] = value  # cache for subsequent accesses
+    return value
 
-from .uncover_ml import (
-    UncoverMLPipeline,
-    ProspectivityWorkflow,
-    FeatureEngineering,
-    ModelEnsemble,
-    UncertaintyQuantification,
-    RasterStack,
-    TrainingData,
-    PredictionResult,
-    FeatureScale,
-    AggregationType,
-    ModelType,
-    create_prospectivity_pipeline as create_uncover_pipeline,
-)
 
-from .torchgeo_models import (
-    GeoFoundationModel,
-    SatelliteImageProcessor,
-    UAVImageProcessor,
-    PretrainedBackbone,
-    FoundationModelType,
-    ImageryType,
-    TaskType,
-    ImageBatch,
-    ModelOutput,
-    create_geo_foundation_model,
-)
-
-from .spatial_cv import (
-    SpatialCrossValidator,
-    BlockCV,
-    BufferedLeaveOneOut,
-    SpatialKFold,
-    CVStrategy,
-    CVFold,
-    CVResult,
-    validate_spatial_model,
-)
-
-from .uncertainty_quantification import (
-    UncertaintyType,
-    ConfidenceLevel,
-    UncertaintyEstimate as UQEstimate,
-    SensitivityResult,
-    CalibrationResult,
-    MCDropoutEstimator,
-    DeepEnsembleEstimator,
-    QuantileRegressionEstimator,
-    SobolSensitivityAnalyzer,
-    CalibrationAssessor,
-    UncertaintyPropagator,
-    UncertaintyQuantificationPipeline,
-    create_uq_pipeline,
-    estimate_grid_uncertainty,
-)
-
-from .mlops_hardening import (
-    ModelStage,
-    DatasetType,
-    DriftType,
-    DatasetVersion,
-    ExperimentRun,
-    ModelCard,
-    DriftAlert,
-    DatasetVersionManager,
-    ExperimentTracker,
-    DriftMonitor,
-    EvaluationSuite,
-    MLOpsPipeline,
-    create_mlops_pipeline,
-    create_experiment_tracker,
-    create_drift_monitor,
-)
-
-from .foundation_models import (
-    DataModality,
-    PretrainingTask,
-    FineTuningStrategy,
-    ModalityConfig,
-    PretrainingConfig,
-    FineTuningConfig,
-    ModelCheckpoint,
-    ModalityAdapter,
-    MultispectralAdapter,
-    GeophysicsAdapter,
-    TextAdapter,
-    PretrainingPipeline,
-    FineTuningPipeline,
-    GeoscienceFoundationModel,
-    FoundationModelRegistry,
-    create_foundation_model,
-    create_pretraining_config,
-    create_finetuning_config,
-)
-
-__all__ = [
-    # Enums
-    'FeatureType',
-    'ValidationStrategy',
-    'ProspectivityModel',
-    
-    # Data classes
-    'RasterLayer',
-    'TrainingPoint',
-    'ProspectivityDataset',
-    
-    # Cross-validation
-    'SpatialBlockCV',
-    'SpatialBufferCV',
-    
-    # Feature generation
-    'FeatureGenerator',
-    
-    # NLP
-    'GeologicalNLPExtractor',
-    
-    # Metrics
-    'SpatialMetrics',
-    
-    # Registry
-    'DatasetRegistry',
-    
-    # Pipeline
-    'ProspectivityPipeline',
-    
-    # Factory functions
-    'create_prospectivity_pipeline',
-    'create_benchmark_dataset',
-    
-    # Gold Exploration
-    'GoldDepositType',
-    'AlterationType',
-    'RegolithType',
-    'GeochemSample',
-    'GoldOccurrence',
-    'StructuralFeature',
-    'GoldPathfinderElements',
-    'AlterationIndices',
-    'RegolithModel',
-    'StructuralComplexity',
-    'GoldDepositPriors',
-    'GoldExplorationPipeline',
-    'create_gold_exploration_pipeline',
-    'create_synthetic_gold_dataset',
-    
-    # Lithium Exploration
-    'LithiumDepositType',
-    'LithiumMineral',
-    'BrineType',
-    'BrineSample',
-    'WellData',
-    'PegmatiteSample',
-    'LithiumPathfinderElements',
-    'BrineChemistry',
-    'HydrogeologyModel',
-    'ClayLithiumAnalysis',
-    'LithiumDepositPriors',
-    'LithiumExplorationPipeline',
-    'create_lithium_exploration_pipeline',
-    'create_synthetic_lithium_dataset',
-    
-    # Soil Suitability
-    'CropType',
-    'SuitabilityClass',
-    'SoilTextureClass',
-    'DrainageClass',
-    'SoilSample',
-    'ClimateData',
-    'TopographyData',
-    'CropRequirements',
-    'SoilSuitabilityScorer',
-    'RemediationRecommender',
-    'SoilSuitabilityPipeline',
-    'create_soil_suitability_pipeline',
-    'create_synthetic_soil_dataset',
-    
-    # Advanced Soil Assessment
-    'HazardSeverity',
-    'ToxicityType',
-    'DiseaseRiskType',
-    'PhosphorusMethod',
-    'SoilPhysicalConstraints',
-    'ToxicityHazard',
-    'NutrientBudget',
-    'UncertaintyEstimate',
-    'WaterBalanceResult',
-    'DiseaseRiskAssessment',
-    'EconomicAnalysis',
-    'ToxicityHazardAssessor',
-    'NutrientBudgetCalculator',
-    'PhysicalConstraintAssessor',
-    'UncertaintyQuantifier',
-    'WaterBalanceCalculator',
-    'DiseaseRiskAssessor',
-    'EconomicAnalyzer',
-    'SpatialInterpolator',
-    'AdvancedSoilSuitabilityPipeline',
-    'create_advanced_soil_pipeline',
-    
-    # UNCOVER-ML Style Pipeline
-    'UncoverMLPipeline',
-    'ProspectivityWorkflow',
-    'FeatureEngineering',
-    'ModelEnsemble',
-    'UncertaintyQuantification',
-    'RasterStack',
-    'TrainingData',
-    'PredictionResult',
-    'FeatureScale',
-    'AggregationType',
-    'ModelType',
-    'create_uncover_pipeline',
-    
-    # TorchGeo Foundation Models
-    'GeoFoundationModel',
-    'SatelliteImageProcessor',
-    'UAVImageProcessor',
-    'PretrainedBackbone',
-    'FoundationModelType',
-    'ImageryType',
-    'TaskType',
-    'ImageBatch',
-    'ModelOutput',
-    'create_geo_foundation_model',
-    
-    # Spatial Cross-Validation
-    'SpatialCrossValidator',
-    'BlockCV',
-    'BufferedLeaveOneOut',
-    'SpatialKFold',
-    'CVStrategy',
-    'CVFold',
-    'CVResult',
-    'validate_spatial_model',
-    
-    # Uncertainty Quantification
-    'UncertaintyType',
-    'ConfidenceLevel',
-    'UQEstimate',
-    'SensitivityResult',
-    'CalibrationResult',
-    'MCDropoutEstimator',
-    'DeepEnsembleEstimator',
-    'QuantileRegressionEstimator',
-    'SobolSensitivityAnalyzer',
-    'CalibrationAssessor',
-    'UncertaintyPropagator',
-    'UncertaintyQuantificationPipeline',
-    'create_uq_pipeline',
-    'estimate_grid_uncertainty',
-    
-    # MLOps Hardening
-    'ModelStage',
-    'DatasetType',
-    'DriftType',
-    'DatasetVersion',
-    'ExperimentRun',
-    'ModelCard',
-    'DriftAlert',
-    'DatasetVersionManager',
-    'ExperimentTracker',
-    'DriftMonitor',
-    'EvaluationSuite',
-    'MLOpsPipeline',
-    'create_mlops_pipeline',
-    'create_experiment_tracker',
-    'create_drift_monitor',
-    
-    # Foundation Models
-    'DataModality',
-    'PretrainingTask',
-    'FineTuningStrategy',
-    'ModalityConfig',
-    'PretrainingConfig',
-    'FineTuningConfig',
-    'ModelCheckpoint',
-    'ModalityAdapter',
-    'MultispectralAdapter',
-    'GeophysicsAdapter',
-    'TextAdapter',
-    'PretrainingPipeline',
-    'FineTuningPipeline',
-    'GeoscienceFoundationModel',
-    'FoundationModelRegistry',
-    'create_foundation_model',
-    'create_pretraining_config',
-    'create_finetuning_config',
-]
+def __dir__():
+    return sorted(set(globals()) | set(_EXPORTS))

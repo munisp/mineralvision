@@ -157,7 +157,7 @@ class ScalarBarSettings:
     font_size: int = 12
 
 
-@dataclass
+@dataclass(kw_only=True)
 class VisualizationObject:
     """Base class for visualization objects."""
     name: str
@@ -1038,3 +1038,134 @@ class VisualizationWorkflow:
 def create_visualization_workflow(project_name: str = "default") -> VisualizationWorkflow:
     """Factory function to create a visualization workflow."""
     return VisualizationWorkflow(project_name)
+
+
+class Visualization3DEngine:
+    """
+    Engine facade over VisualizationWorkflow providing the scene-generation
+    interface consumed by the API layer.
+
+    Scene data (drillholes, block models, surfaces) is registered against
+    string IDs; generate_*_scene() builds serializable 3D scene payloads
+    (objects, bounds, camera) from the registered data. A ValueError is
+    raised when no data is registered for the requested ID.
+    """
+
+    def __init__(self, project_name: str = "default"):
+        self.project_name = project_name
+        self._drillholes: Dict[str, List[Dict[str, Any]]] = {}
+        self._block_models: Dict[str, List[Dict[str, Any]]] = {}
+        self._surfaces: Dict[str, Dict[str, Any]] = {}
+
+    def register_drillholes(self, project_id: str, drillholes: List[Dict[str, Any]]):
+        """Register drillhole data for a project."""
+        self._drillholes[project_id] = list(drillholes)
+
+    def register_block_model(self, model_id: str, blocks: List[Dict[str, Any]]):
+        """Register block model blocks."""
+        self._block_models[model_id] = list(blocks)
+
+    def register_surface(self, surface_id: str, vertices: List[Dict[str, float]],
+                         triangles: Optional[List[Any]] = None):
+        """Register a surface mesh."""
+        self._surfaces[surface_id] = {
+            "vertices": list(vertices),
+            "triangles": list(triangles) if triangles else []
+        }
+
+    @staticmethod
+    def _bounds(points: List[Dict[str, float]]) -> Dict[str, Any]:
+        xs = [p.get("x", 0.0) for p in points] or [0.0]
+        ys = [p.get("y", 0.0) for p in points] or [0.0]
+        zs = [p.get("z", 0.0) for p in points] or [0.0]
+        return {
+            "min": {"x": min(xs), "y": min(ys), "z": min(zs)},
+            "max": {"x": max(xs), "y": max(ys), "z": max(zs)}
+        }
+
+    @staticmethod
+    def _camera(bounds: Dict[str, Any]) -> Dict[str, Any]:
+        cx = (bounds["min"]["x"] + bounds["max"]["x"]) / 2
+        cy = (bounds["min"]["y"] + bounds["max"]["y"]) / 2
+        cz = (bounds["min"]["z"] + bounds["max"]["z"]) / 2
+        span = max(
+            bounds["max"]["x"] - bounds["min"]["x"],
+            bounds["max"]["y"] - bounds["min"]["y"],
+            1.0
+        )
+        return {
+            "position": {"x": cx + span, "y": cy - span, "z": cz + span},
+            "target": {"x": cx, "y": cy, "z": cz}
+        }
+
+    def generate_drillhole_scene(self, project_id: str) -> Dict[str, Any]:
+        """Build a 3D drillhole scene payload for a project."""
+        drillholes = self._drillholes.get(project_id)
+        if not drillholes:
+            raise ValueError(f"No drillhole data registered for project {project_id}")
+
+        workflow = create_visualization_workflow(project_id)
+        workflow.add_drillholes(drillholes)
+
+        collars = [
+            {
+                "x": d.get("collar_x", d.get("easting", 0.0)),
+                "y": d.get("collar_y", d.get("northing", 0.0)),
+                "z": d.get("collar_z", d.get("elevation", 0.0))
+            }
+            for d in drillholes
+        ]
+        bounds = self._bounds(collars)
+
+        return {
+            "drillholes": drillholes,
+            "bounds": bounds,
+            "camera": self._camera(bounds),
+            "scene": workflow.get_summary()
+        }
+
+    def generate_block_model_scene(self, block_model_id: str) -> Dict[str, Any]:
+        """Build a 3D block model scene payload."""
+        blocks = self._block_models.get(block_model_id)
+        if not blocks:
+            raise ValueError(f"No block model registered with id {block_model_id}")
+
+        workflow = create_visualization_workflow(block_model_id)
+        sample = blocks[0] if blocks else {}
+        block_size = (
+            float(sample.get("dx", sample.get("block_size_x", 10.0))),
+            float(sample.get("dy", sample.get("block_size_y", 10.0))),
+            float(sample.get("dz", sample.get("block_size_z", 10.0)))
+        )
+        workflow.add_block_model(blocks, block_size)
+
+        bounds = self._bounds(blocks)
+        return {
+            "blocks": blocks,
+            "bounds": bounds,
+            "camera": self._camera(bounds),
+            "scene": workflow.get_summary()
+        }
+
+    def generate_surface_scene(self, surface_id: str) -> Dict[str, Any]:
+        """Build a 3D surface scene payload."""
+        surface = self._surfaces.get(surface_id)
+        if not surface:
+            raise ValueError(f"No surface registered with id {surface_id}")
+
+        workflow = create_visualization_workflow(surface_id)
+        workflow.add_surface(surface["vertices"], surface["triangles"])
+
+        bounds = self._bounds(surface["vertices"])
+        return {
+            "vertices": surface["vertices"],
+            "triangles": surface["triangles"],
+            "bounds": bounds,
+            "camera": self._camera(bounds),
+            "scene": workflow.get_summary()
+        }
+
+
+def create_visualization_engine(project_name: str = "default") -> Visualization3DEngine:
+    """Factory function to create a Visualization3DEngine."""
+    return Visualization3DEngine(project_name)

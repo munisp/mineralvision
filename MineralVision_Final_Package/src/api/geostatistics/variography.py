@@ -101,6 +101,25 @@ class LagBin:
 
 
 @dataclass
+class DirectionDefinition:
+    """Direction specification for directional variogram calculation."""
+    azimuth: float = 0.0
+    dip: float = 0.0
+    tolerance: float = 22.5
+    bandwidth: float = 1e9
+
+    def unit_vector(self) -> Tuple[float, float, float]:
+        """Return the unit vector for this direction."""
+        az_rad = math.radians(self.azimuth)
+        dip_rad = math.radians(self.dip)
+        return (
+            math.sin(az_rad) * math.cos(dip_rad),
+            math.cos(az_rad) * math.cos(dip_rad),
+            -math.sin(dip_rad)
+        )
+
+
+@dataclass
 class ExperimentalVariogram:
     """Experimental variogram data."""
     name: str
