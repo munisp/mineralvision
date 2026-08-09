@@ -26,20 +26,17 @@ import {
   ListItemIcon,
   IconButton,
   Tooltip,
-  LinearProgress,
   Paper,
   Divider,
 } from '@mui/material';
 import {
   PlayArrow,
-  Stop,
   CheckCircle,
   Error,
   HourglassEmpty,
   Refresh,
   Info,
   Timeline,
-  Category,
   Schedule,
   Security,
   Storage,
@@ -275,7 +272,7 @@ const JourneysPage: React.FC = () => {
         <Typography variant="h6" gutterBottom>Middleware Status</Typography>
         <Grid container spacing={1}>
           {middlewareStatus && Object.entries(middlewareStatus.status).map(([name, status]) => (
-            <Grid item key={name}>
+            <Grid size="auto" key={name}>
               <Chip
                 label={name}
                 color={status === 'connected' ? 'success' : 'default'}
@@ -325,7 +322,7 @@ const JourneysPage: React.FC = () => {
             key={cat}
             value={cat}
             label={cat.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-            icon={categoryIcons[cat]}
+            icon={categoryIcons[cat] as React.ReactElement | undefined}
             iconPosition="start"
           />
         ))}
@@ -339,7 +336,7 @@ const JourneysPage: React.FC = () => {
       ) : (
         <Grid container spacing={3}>
           {filteredJourneys.map(journey => (
-            <Grid item xs={12} sm={6} md={4} key={journey.id}>
+            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={journey.id}>
               <Card
                 sx={{
                   height: '100%',
@@ -438,7 +435,7 @@ const JourneysPage: React.FC = () => {
 
               <Typography variant="subtitle2" gutterBottom>Journey Steps</Typography>
               <Stepper orientation="vertical">
-                {selectedJourney.steps.map((step, index) => (
+                {selectedJourney.steps.map((step) => (
                   <Step key={step.id} active>
                     <StepLabel>
                       <Typography variant="subtitle2">{step.name}</Typography>
