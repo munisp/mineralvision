@@ -18,11 +18,17 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import Column, DateTime, Float, String, Text, create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-# Dual-context import of the platform database core (models + Base).
+# Dual-context import of the platform database models (for entity queries).
+# NOTE: we deliberately do NOT use the platform Base for our auxiliary table —
+# registering on it would create schema drift against the alembic migrations.
 try:  # running inside the FastAPI package layout (src/ on sys.path)
-    from src.api.database import Base, DrillholeModel, ProjectModel, SampleModel
+    from src.api.database import DrillholeModel, ProjectModel, SampleModel
 except ImportError:  # running with MineralVision_Final_Package/src on sys.path
-    from api.database import Base, DrillholeModel, ProjectModel, SampleModel
+    from api.database import DrillholeModel, ProjectModel, SampleModel
+
+from sqlalchemy.orm import declarative_base
+
+Base = declarative_base()  # module-private metadata for auxiliary tables
 
 
 # ---------------------------------------------------------------------------

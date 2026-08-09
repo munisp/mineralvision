@@ -8,6 +8,7 @@ the lakehouse parquet sync (real pyarrow write + read-back row count) and
 the Sedona availability status. No mocks, no skips.
 """
 
+import atexit
 import os
 import sys
 import tempfile
@@ -23,8 +24,28 @@ _TMPDIR = tempfile.mkdtemp(prefix="geodb_test_")
 _DB_PATH = os.path.join(_TMPDIR, "geodb_test.db")
 _LAKEHOUSE = os.path.join(_TMPDIR, "lakehouse")
 
+_PREV_ENV = {k: os.environ.get(k) for k in ("DATABASE_URL", "GEODB_LAKEHOUSE_PATH")}
 os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH}"
 os.environ["GEODB_LAKEHOUSE_PATH"] = _LAKEHOUSE
+
+
+def _restore_env():
+    for _k, _v in _PREV_ENV.items():
+        if _v is None:
+            os.environ.pop(_k, None)
+        else:
+            os.environ[_k] = _v
+
+
+atexit.register(_restore_env)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _restore_env_after_module():
+    """Restore DATABASE_URL/GEODB_LAKEHOUSE_PATH so later test modules
+    (e.g. observability alembic tests) are not polluted."""
+    yield
+    _restore_env()
 
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
