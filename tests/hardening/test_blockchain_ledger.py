@@ -108,8 +108,11 @@ def test_manager_multisig_execution_recorded():
         "h", "i", "drillhole", {}, use_multisig=True,
     )
     proposal_id = result["proposal"]["proposal_id"]
-    manager.multisig_manager.approve(proposal_id, "s1")
-    manager.multisig_manager.approve(proposal_id, "s2")
+    # The proposer's signature is already counted; approve with the other signer
+    already = set(result["proposal"]["signatures"])
+    for signer in ("s1", "s2"):
+        if signer not in already:
+            manager.multisig_manager.approve(proposal_id, signer)
     manager.multisig_manager.execute(proposal_id)
 
     proposal = manager.multisig_manager.get_proposal(proposal_id)
