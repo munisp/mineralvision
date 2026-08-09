@@ -48,9 +48,11 @@ export function featureTileProbeUrl(layer: GeoToolkitLayer, baseUrl?: string): s
   return `${resolveBaseUrl(baseUrl)}/innovations/geotoolkit/tiles/features/0/0/0?layer=${layer}`;
 }
 
-/** URL template for targeting heatmap raster PNG tiles. */
+/** URL template for targeting heatmap raster PNG tiles (absolute — MapLibre
+ * raster sources do not resolve relative tile URLs). */
 export function heatmapTileUrl(rasterId: string, baseUrl?: string): string {
-  return `${resolveBaseUrl(baseUrl)}/innovations/geotoolkit/targeting/tiles/${encodeURIComponent(
+  const base = resolveBaseUrl(baseUrl) || window.location.origin;
+  return `${base}/innovations/geotoolkit/targeting/tiles/${encodeURIComponent(
     rasterId,
   )}/{z}/{x}/{y}`;
 }

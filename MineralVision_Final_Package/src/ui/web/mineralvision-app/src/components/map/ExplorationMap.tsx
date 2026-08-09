@@ -213,10 +213,16 @@ export default function ExplorationMap({
             }
           }
         }
-        // Dedupe: a feature near a tile edge appears in multiple tiles.
+        // Dedupe: a feature near a tile edge appears in multiple tiles (the
+        // backend marks clipped copies with a volatile `clipped` flag, which
+        // is excluded from the identity key).
         const seen = new Set<string>();
         merged.features = merged.features.filter((f) => {
-          const key = JSON.stringify([f.geometry, f.properties]);
+          const { clipped: _clipped, ...stableProps } = f.properties ?? {};
+          const key = JSON.stringify([
+            (f.geometry as { type?: string })?.type,
+            stableProps,
+          ]);
           if (seen.has(key)) return false;
           seen.add(key);
           return true;
