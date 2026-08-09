@@ -10,8 +10,6 @@ import {
   Button,
   Chip,
   LinearProgress,
-  Alert,
-  AlertTitle,
   IconButton,
   Tooltip,
   Select,
@@ -24,14 +22,12 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Paper,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
   TextField,
   Divider,
-  Slider,
   ToggleButton,
   ToggleButtonGroup,
   Stepper,
@@ -49,7 +45,6 @@ import {
   Satellite as SatelliteIcon,
   Terrain as TerrainIcon,
   Warning as WarningIcon,
-  CheckCircle as CheckCircleIcon,
   Map as MapIcon,
   Science as ScienceIcon,
   Notifications as NotificationsIcon,
@@ -57,7 +52,6 @@ import {
   Refresh as RefreshIcon,
   Download as DownloadIcon,
   Add as AddIcon,
-  Visibility as VisibilityIcon,
   TrendingUp as TrendingUpIcon,
   TrendingDown as TrendingDownIcon,
   CompareArrows as CompareIcon,
@@ -67,7 +61,6 @@ import {
   LocationOn as LocationIcon,
   Speed as SpeedIcon,
   Diamond as DiamondIcon,
-  Bolt as BoltIcon,
   Analytics as AnalyticsIcon,
   Explore as ExploreIcon,
   Assessment as AssessmentIcon,
@@ -76,8 +69,6 @@ import {
 import {
   LineChart,
   Line,
-  AreaChart,
-  Area,
   BarChart,
   Bar,
   PieChart,
@@ -89,7 +80,6 @@ import {
   Tooltip as RechartsTooltip,
   Legend,
   ResponsiveContainer,
-  ComposedChart,
   RadarChart,
   Radar,
   PolarGrid,
@@ -204,7 +194,8 @@ const MineralMonitoringPage: React.FC = () => {
   const [targetStep, setTargetStep] = useState(0);
   const [selectedMineral, setSelectedMineral] = useState('all');
   const [compareMode, setCompareMode] = useState(false);
-  const [dateRange, setDateRange] = useState<number[]>([0, 90]);
+  const [dateRange] = useState<number[]>([0, 90]);
+  void dateRange; // retained for future range filtering
   const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
   const [selectedSiteDetail, setSelectedSiteDetail] = useState<typeof mockSites[0] | null>(null);
   const [alertFilter, setAlertFilter] = useState('all');
@@ -309,7 +300,7 @@ const MineralMonitoringPage: React.FC = () => {
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card sx={{ background: 'linear-gradient(135deg, #ffd700 0%, #ff8f00 100%)', color: 'white', borderRadius: 3, boxShadow: '0 8px 32px rgba(255, 215, 0, 0.3)', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}>
             <CardContent>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -325,7 +316,7 @@ const MineralMonitoringPage: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card sx={{ background: 'linear-gradient(135deg, #11998e 0%, #38ef7d 100%)', color: 'white', borderRadius: 3, boxShadow: '0 8px 32px rgba(17, 153, 142, 0.3)', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}>
             <CardContent>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -344,7 +335,7 @@ const MineralMonitoringPage: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card sx={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', borderRadius: 3, boxShadow: '0 8px 32px rgba(102, 126, 234, 0.3)', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}>
             <CardContent>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -360,7 +351,7 @@ const MineralMonitoringPage: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <Card sx={{ background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)', color: 'white', borderRadius: 3, boxShadow: '0 8px 32px rgba(240, 147, 251, 0.3)', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}>
             <CardContent>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -408,7 +399,7 @@ const MineralMonitoringPage: React.FC = () => {
           </Box>
 
           <Grid container spacing={3}>
-            <Grid item xs={12} lg={8}>
+            <Grid size={{ xs: 12, lg: 8 }}>
               <Card variant="outlined" sx={{ borderRadius: 2 }}>
                 <CardContent>
                   <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
@@ -530,7 +521,7 @@ const MineralMonitoringPage: React.FC = () => {
               </Card>
             </Grid>
 
-            <Grid item xs={12} lg={4}>
+            <Grid size={{ xs: 12, lg: 4 }}>
               <Card variant="outlined" sx={{ borderRadius: 2, mb: 2 }}>
                 <CardContent>
                   <Typography variant="subtitle1" fontWeight="600" gutterBottom>Target Zone Distribution</Typography>
@@ -593,7 +584,7 @@ const MineralMonitoringPage: React.FC = () => {
           </Box>
 
           <Grid container spacing={3}>
-            <Grid item xs={12} lg={8}>
+            <Grid size={{ xs: 12, lg: 8 }}>
               <Card variant="outlined" sx={{ borderRadius: 2 }}>
                 <CardContent>
                   <Typography variant="subtitle1" fontWeight="600" gutterBottom>Element Concentrations by Site</Typography>
@@ -633,7 +624,7 @@ const MineralMonitoringPage: React.FC = () => {
               </Card>
             </Grid>
 
-            <Grid item xs={12} lg={4}>
+            <Grid size={{ xs: 12, lg: 4 }}>
               <Card variant="outlined" sx={{ borderRadius: 2, mb: 2, bgcolor: '#fff8e1' }}>
                 <CardContent>
                   <Typography variant="subtitle1" fontWeight="600" gutterBottom>Anomaly Summary</Typography>
@@ -660,7 +651,7 @@ const MineralMonitoringPage: React.FC = () => {
                   <Typography variant="subtitle1" fontWeight="600" gutterBottom>Sample Statistics</Typography>
                   <Grid container spacing={1}>
                     {[{ label: 'Total Samples', value: '2,450' }, { label: 'This Month', value: '185' }, { label: 'Pending Analysis', value: '42' }, { label: 'QA/QC Pass Rate', value: '98.5%' }].map((item) => (
-                      <Grid item xs={6} key={item.label}>
+                      <Grid size={{ xs: 6 }} key={item.label}>
                         <Box sx={{ p: 1.5, bgcolor: '#f5f5f5', borderRadius: 2, textAlign: 'center' }}>
                           <Typography variant="h5" fontWeight="bold">{item.value}</Typography>
                           <Typography variant="caption" color="text.secondary">{item.label}</Typography>
@@ -685,7 +676,7 @@ const MineralMonitoringPage: React.FC = () => {
           </Box>
 
           <Grid container spacing={3}>
-            <Grid item xs={12} lg={8}>
+            <Grid size={{ xs: 12, lg: 8 }}>
               <Card variant="outlined" sx={{ borderRadius: 2 }}>
                 <CardContent>
                   <Typography variant="subtitle1" fontWeight="600" gutterBottom>Survey Coverage by Site</Typography>
@@ -705,7 +696,7 @@ const MineralMonitoringPage: React.FC = () => {
               </Card>
             </Grid>
 
-            <Grid item xs={12} lg={4}>
+            <Grid size={{ xs: 12, lg: 4 }}>
               <Card variant="outlined" sx={{ borderRadius: 2 }}>
                 <CardContent>
                   <Typography variant="subtitle1" fontWeight="600" gutterBottom>Survey Status</Typography>
@@ -735,7 +726,7 @@ const MineralMonitoringPage: React.FC = () => {
           </Box>
 
           <Grid container spacing={3}>
-            <Grid item xs={12} lg={8}>
+            <Grid size={{ xs: 12, lg: 8 }}>
               <Card variant="outlined" sx={{ borderRadius: 2 }}>
                 <CardContent>
                   <Typography variant="subtitle1" fontWeight="600" gutterBottom>Recent Drill Results</Typography>
@@ -799,7 +790,7 @@ const MineralMonitoringPage: React.FC = () => {
               </Card>
             </Grid>
 
-            <Grid item xs={12} lg={4}>
+            <Grid size={{ xs: 12, lg: 4 }}>
               <Card variant="outlined" sx={{ borderRadius: 2, mb: 2, bgcolor: '#e8f5e9' }}>
                 <CardContent>
                   <Typography variant="subtitle1" fontWeight="600" gutterBottom>Total Resources</Typography>
@@ -867,7 +858,7 @@ const MineralMonitoringPage: React.FC = () => {
           </Box>
 
           <Grid container spacing={3}>
-            <Grid item xs={12} md={8}>
+            <Grid size={{ xs: 12, md: 8 }}>
               {mockAlerts.map((alert) => (
                 <Card key={alert.id} variant="outlined" sx={{ mb: 2, borderRadius: 2, borderLeft: `4px solid ${alert.severity === 'high' ? '#4caf50' : alert.severity === 'medium' ? '#ff9800' : '#2196f3'}` }}>
                   <CardContent>
@@ -899,13 +890,13 @@ const MineralMonitoringPage: React.FC = () => {
               ))}
             </Grid>
 
-            <Grid item xs={12} md={4}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <Card variant="outlined" sx={{ borderRadius: 2, mb: 2 }}>
                 <CardContent>
                   <Typography variant="subtitle1" fontWeight="600" gutterBottom>Alert Summary</Typography>
                   <Grid container spacing={1}>
                     {[{ label: 'Discovery', count: 1, color: '#4caf50' }, { label: 'Anomaly', count: 1, color: '#ff9800' }, { label: 'Environmental', count: 1, color: '#2196f3' }, { label: 'Safety', count: 0, color: '#f44336' }].map((item) => (
-                      <Grid item xs={6} key={item.label}>
+                      <Grid size={{ xs: 6 }} key={item.label}>
                         <Box sx={{ p: 1.5, bgcolor: '#f5f5f5', borderRadius: 2, textAlign: 'center', borderLeft: `3px solid ${item.color}` }}>
                           <Typography variant="h4" fontWeight="bold">{item.count}</Typography>
                           <Typography variant="caption" color="text.secondary">{item.label}</Typography>
@@ -1013,7 +1004,7 @@ const MineralMonitoringPage: React.FC = () => {
               <Typography variant="body2" color="text.secondary" gutterBottom>Select the ML model for target generation</Typography>
               <Grid container spacing={2} sx={{ mt: 1 }}>
                 {[{ type: 'Random Forest', desc: 'Ensemble learning for multi-layer analysis', icon: <BubbleChartIcon /> }, { type: 'Neural Network', desc: 'Deep learning for complex patterns', icon: <AnalyticsIcon /> }, { type: 'Gradient Boosting', desc: 'High accuracy for structured data', icon: <TrendingUpIcon /> }, { type: 'Ensemble', desc: 'Combined model predictions', icon: <LayersIcon /> }].map((item) => (
-                  <Grid item xs={6} key={item.type}>
+                  <Grid size={{ xs: 6 }} key={item.type}>
                     <Card variant="outlined" sx={{ p: 2, cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5', borderColor: 'primary.main' }, transition: 'all 0.2s' }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>{item.icon}<Typography variant="subtitle1" fontWeight="600">{item.type}</Typography></Box>
                       <Typography variant="body2" color="text.secondary">{item.desc}</Typography>
@@ -1028,8 +1019,8 @@ const MineralMonitoringPage: React.FC = () => {
             <Box>
               <Typography variant="body2" color="text.secondary" gutterBottom>Configure target generation parameters</Typography>
               <Grid container spacing={2} sx={{ mt: 1 }}>
-                <Grid item xs={6}><TextField fullWidth label="Minimum Confidence (%)" type="number" defaultValue="60" /></Grid>
-                <Grid item xs={6}>
+                <Grid size={{ xs: 6 }}><TextField fullWidth label="Minimum Confidence (%)" type="number" defaultValue="60" /></Grid>
+                <Grid size={{ xs: 6 }}>
                   <FormControl fullWidth>
                     <InputLabel>Target Priority</InputLabel>
                     <Select label="Target Priority" defaultValue={3}>
@@ -1040,8 +1031,8 @@ const MineralMonitoringPage: React.FC = () => {
                     </Select>
                   </FormControl>
                 </Grid>
-                <Grid item xs={6}><TextField fullWidth label="Min Area (km²)" type="number" defaultValue="5" /></Grid>
-                <Grid item xs={6}><TextField fullWidth label="Max Targets" type="number" defaultValue="20" /></Grid>
+                <Grid size={{ xs: 6 }}><TextField fullWidth label="Min Area (km²)" type="number" defaultValue="5" /></Grid>
+                <Grid size={{ xs: 6 }}><TextField fullWidth label="Max Targets" type="number" defaultValue="20" /></Grid>
               </Grid>
             </Box>
           )}

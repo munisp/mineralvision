@@ -384,11 +384,35 @@ class DeltaLakeStorage:
             self.logger.error(f"Failed to read table {table_name}: {str(e)}")
             return pd.DataFrame()
     
-    def read_data(self, table_name: str, zone: str = "processed", 
+    def read_data(self, table_name: str, zone: str = "processed",
                   version: Optional[int] = None, timestamp: Optional[str] = None,
-                  filter_expr: Optional[str] = None) -> pd.DataFrame:
-        """Alias for read_table for backward compatibility with tests."""
-        return self.read_table(table_name, zone, version, timestamp, filter_expr)
+                  filter_expr: Optional[str] = None,
+                  columns: Optional[List[str]] = None,
+                  filters: Optional[List[tuple]] = None) -> pd.DataFrame:
+        """Alias for read_table for backward compatibility with tests.
+
+        Also honors legacy ``columns=[...]`` (column projection) and
+        ``filters=[(col, op, value), ...]`` kwargs by applying them to the
+        resulting DataFrame.
+        """
+        df = self.read_table(table_name, zone, version, timestamp, filter_expr)
+        if df is None:
+            return df
+        if filters:
+            ops = {
+                "<": lambda c, v: c < v, "<=": lambda c, v: c <= v,
+                ">": lambda c, v: c > v, ">=": lambda c, v: c >= v,
+                "=": lambda c, v: c == v, "==": lambda c, v: c == v,
+                "!=": lambda c, v: c != v,
+            }
+            for col, op, value in filters:
+                if col in df.columns and op in ops:
+                    df = df[ops[op](df[col], value)]
+        if columns:
+            keep = [c for c in columns if c in df.columns]
+            if keep:
+                df = df[keep]
+        return df
     
     def optimize_table(self, table_name: str, zone: str = "processed", 
                       z_order_by: Optional[List[str]] = None) -> bool:

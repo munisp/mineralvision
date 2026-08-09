@@ -38,6 +38,7 @@ class RayConfig:
     memory: Optional[int] = None  # Memory in bytes
     object_store_memory: Optional[int] = None  # Object store memory in bytes
     resources: Optional[Dict[str, float]] = None  # Custom resources
+    enable_dashboard: bool = False  # honored via ray.init(include_dashboard=...)
     log_level: str = "INFO"
     
     # ML-specific configurations
@@ -102,6 +103,7 @@ class RayProcessor:
                     init_kwargs["num_cpus"] = self.config.num_cpus
                 if self.config.num_gpus is not None:
                     init_kwargs["num_gpus"] = self.config.num_gpus
+                init_kwargs["include_dashboard"] = self.config.enable_dashboard
                 
                 if not ray.is_initialized():
                     ray.init(**init_kwargs, ignore_reinit_error=True)
@@ -155,21 +157,41 @@ class RayProcessor:
         """Alias for parallel_task for backward compatibility with tests."""
         return self.parallel_task(func, items, num_cpus_per_task, num_gpus_per_task)
     
-    def process_dataset(self, dataset_path: str, transformations: List[Dict],
-                       output_path: Optional[str] = None) -> Any:
+    def process_dataset(self, dataset_path: Any, transformations: Any,
+                       output_path: Optional[str] = None,
+                       batch_size: Optional[int] = None) -> Any:
         """
         Process a dataset using Ray Data.
-        
+
         Args:
-            dataset_path: Path to the dataset
-            transformations: List of transformations to apply
+            dataset_path: Path to the dataset, or (legacy form) an in-memory
+                list of item dicts
+            transformations: List of transformation dicts, or (legacy form) a
+                callable applied to each dataset item
             output_path: Path to write the processed dataset to
-            
+            batch_size: (legacy form) batch size used when applying a callable
+                transformation over an in-memory dataset
+
         Returns:
             Any: Processed dataset (in a real implementation, this would be a Ray Dataset)
         """
+        # Legacy API: process_dataset(items, fn, batch_size=N) — apply the
+        # callable over the in-memory dataset in batches and return results.
+        if callable(transformations) and isinstance(dataset_path, (list, tuple)):
+            fn = transformations
+            bs = batch_size or len(dataset_path) or 1
+            self.logger.info(
+                f"Processing {len(dataset_path)} in-memory items with callable "
+                f"in batches of {bs}"
+            )
+            processed = []
+            for start in range(0, len(dataset_path), bs):
+                batch = dataset_path[start:start + bs]
+                processed.extend(fn(item) for item in batch)
+            return processed
+
         self.logger.info(f"Processing dataset from {dataset_path}")
-        
+
         # In a real implementation, we would use Ray Data to process the dataset
         # For this implementation, we'll just log the operations
         
