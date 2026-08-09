@@ -65,7 +65,11 @@ class ExplorationArea(BaseModel):
 class AutonomousExplorationSystem:
     """Core system for autonomous exploration."""
     
-    def __init__(self, data_dir: str = "/home/ubuntu/MineralVision/data/autonomous_exploration"):
+    def __init__(self, data_dir: str = None):
+        data_dir = data_dir or os.getenv(
+            "MINERALVISION_DATA_DIR",
+            os.path.join(os.path.expanduser("~"), ".mineralvision", "data", "autonomous_exploration"),
+        )
         """Initialize the autonomous exploration system."""
         self.data_dir = data_dir
         os.makedirs(data_dir, exist_ok=True)

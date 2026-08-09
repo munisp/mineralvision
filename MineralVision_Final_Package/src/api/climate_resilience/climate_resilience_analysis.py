@@ -28,7 +28,11 @@ class ClimateResilienceAnalysis:
     of mineral exploration and mining operations.
     """
     
-    def __init__(self, data_dir: str = "/home/ubuntu/MineralVision/data/climate"):
+    def __init__(self, data_dir: str = None):
+        data_dir = data_dir or os.getenv(
+            "MINERALVISION_DATA_DIR",
+            os.path.join(os.path.expanduser("~"), ".mineralvision", "data", "climate"),
+        )
         """
         Initialize the climate resilience analysis system.
         

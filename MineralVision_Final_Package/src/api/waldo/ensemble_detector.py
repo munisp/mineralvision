@@ -509,7 +509,15 @@ class EnsembleWALDODetector:
         try:
             # Import from existing rfdetr_backbone module
             import sys
-            sys.path.insert(0, "/home/ubuntu/mineralvision/MineralVision_WALDO_Production_Package/src")
+            import os as _os
+            _waldo_src = _os.getenv(
+                "WALDO_PACKAGE_SRC",
+                _os.path.normpath(_os.path.join(
+                    _os.path.dirname(__file__), "..", "..", "..", "..",
+                    "MineralVision_WALDO_Production_Package", "src")),
+            )
+            if _waldo_src not in sys.path:
+                sys.path.insert(0, _waldo_src)
             from waldo_integration.rfdetr_backbone import RFDETRDetector, RFDETRConfig, RFDETRVariant
             
             rfdetr_config = RFDETRConfig(
