@@ -70,6 +70,13 @@ def initialize():
 
 # API Routes
 
+@app.route('/health', methods=['GET'])
+def health():
+    """Container healthcheck endpoint (consumed by MineralVision waldo_proxy
+    health_check() and docker healthchecks; mirrors /api/status)."""
+    return jsonify({'status': 'healthy'})
+
+
 @app.route('/api/status', methods=['GET'])
 def get_status():
     """Get the current system status."""
