@@ -23,11 +23,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from datetime import datetime
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Structured JSON logging + request-id correlation (observability)
+from .observability.logging_config import RequestIDMiddleware, setup_logging
+from .observability.metrics import MetricsMiddleware, metrics_endpoint
+from .observability.health_checks import run_health_checks
+
+# Configure structured JSON logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # Database and security infrastructure
@@ -127,7 +129,11 @@ app = FastAPI(
     openapi_url="/openapi.json"
 )
 
-# Enforce JWT authentication globally (public paths are the only exceptions)
+# Enforce JWT authentication globally (public paths are the only exceptions).
+# /metrics is public on the internal-network assumption: it must be reachable
+# by the Prometheus scraper without a token. Do not expose it on the public
+# internet without adding auth.
+JWTMiddleware.PUBLIC_PATHS.add("/metrics")
 app.add_middleware(JWTMiddleware, enforce=True)
 
 # Configure CORS from environment (never '*' with credentials)
@@ -138,6 +144,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Observability middleware (outermost: request-id, then request metrics)
+app.add_middleware(MetricsMiddleware)
+app.add_middleware(RequestIDMiddleware)
+
+
+# Prometheus metrics endpoint (public, internal-network assumption above)
+@app.get("/metrics", tags=["observability"], include_in_schema=False)
+async def metrics(request: Request):
+    """Prometheus text exposition of API request metrics."""
+    return await metrics_endpoint(request)
 
 
 # Global exception handler
@@ -153,12 +170,12 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Health check endpoint (public)
 @app.get("/health", tags=["health"])
 async def health_check():
-    """Health check endpoint for load balancers and monitoring."""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-        "version": "1.0.0"
-    }
+    """Real health checks: database connectivity, data-dir writability, version.
+
+    200 when all checks pass, 503 with per-check detail when degraded.
+    """
+    status_code, payload = run_health_checks()
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 # API status endpoint
