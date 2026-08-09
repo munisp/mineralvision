@@ -25,7 +25,6 @@ import {
   Brain,
   Video,
   Workflow,
-  Leaf,
   Gem,
 } from 'lucide-react';
 
@@ -68,7 +67,6 @@ const navigation: NavItem[] = [
   { name: 'AI Insights', href: '/ai-insights', icon: Brain },
   { name: 'Molmo2 Video', href: '/molmo2', icon: Video },
   { name: 'User Journeys', href: '/journeys', icon: Workflow },
-  { name: 'Crop Monitoring', href: '/crop-monitoring', icon: Leaf },
   { name: 'Mineral Monitoring', href: '/mineral-monitoring', icon: Gem },
 ];
 

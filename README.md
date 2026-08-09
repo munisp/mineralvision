@@ -1,70 +1,91 @@
 # MineralVision
 
-AI-Powered Mineral Exploration Platform
+[![CI](https://github.com/mineralvision/mineralvision/actions/workflows/ci.yml/badge.svg)](https://github.com/mineralvision/mineralvision/actions/workflows/ci.yml)
 
-## Overview
+**The premiere platform for mineral exploration, discovery, and compliance.**
 
-MineralVision is a comprehensive platform for mineral exploration integrating geology, geostatistics, geophysics, sensor fusion, AI/ML, digital twin, climate resilience, autonomous exploration, indigenous knowledge integration, and blockchain data provenance.
+MineralVision unifies the full exploration lifecycle — satellite anomaly
+detection, target ranking, drilling, resource estimation, and compliant
+reporting — behind a single FastAPI backend and a single React web
+application. Read [docs/VISION.md](docs/VISION.md) for the platform vision
+and the personas it serves.
 
 ## Quick Start
 
+### API (canonical entry point)
+
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Copy environment configuration
-cp .env.example .env
-
-# Run the API server
-cd MineralVision_Final_Package/src
-uvicorn api.main_production:app --host 0.0.0.0 --port 8000
-
-# Run the web UI (separate terminal)
-cd MineralVision_Final_Package/src/ui/web/mineralvision-app
-npm install && npm start
+cd MineralVision_Final_Package
+uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Interactive API docs are then available at http://localhost:8000/docs
+(Swagger UI) and http://localhost:8000/redoc (ReDoc).
+
+> Note: `src.api.main:app` is the canonical application entry point. The
+> historical `main_demo.py` / `main_production.py` / `main_simple.py` /
+> `main_standalone.py` entry points are being consolidated into it.
+
+### Web UI
+
+```bash
+cd MineralVision_Final_Package/src/ui/web/mineralvision-app
+npm ci
+npm run dev
+```
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+## Features
+
+- **Drillhole database** — collars, surveys, assays, lithology, with 3D
+  visualization and cross-sections
+- **QAQC** — standards, blanks, and duplicates tracked from assay load to
+  resource report
+- **Geostatistics** — variography, kriging, block modeling, grade shells
+  (`src/api/geostatistics/`)
+- **Geophysical inversion** — gravity, magnetics, EM
+  (`src/api/geophysics/`)
+- **Prospectivity ML** — target ranking with spatial cross-validation and
+  uncertainty quantification (`src/api/ml/`)
+- **WALDO field detection** — YOLO11 + RF-DETR ensemble detection of
+  outcrop, gossan, and alteration indicators in field imagery
+- **Sensor fusion** — magnetometry, radiometrics, hyperspectral, LiDAR, GPR,
+  and SEG-Y with Kalman and deep-learning fusion (`src/api/sensor_fusion/`)
+- **Compliant reporting** — JORC- and NI 43-101-aligned report generation
+  with end-to-end audit trails (`src/api/reporting/`)
+- **Auth & multi-tenancy** — JWT authentication with role-based access
+  control
 
 ## Project Structure
 
 ```
 mineralvision/
-├── MineralVision_Enhanced/          # Lakehouse + Middleware
-│   ├── lakehouse_architecture/      # Delta Lake, Iceberg, Kafka streaming
-│   └── middleware/                  # 16 middleware integrations
-├── MineralVision_Final_Package/     # API + ML + UI
+├── MineralVision_Final_Package/     # Canonical API + UI
 │   └── src/
-│       ├── api/                     # FastAPI endpoints
-│       ├── ml/                      # Machine learning models
-│       └── ui/                      # Web (React) + Mobile (Flutter)
-├── MineralVision_WALDO_Production_Package/  # Object detection
-│   └── src/waldo_integration/       # YOLOv8 + RF-DETR detection
+│       ├── api/                     # FastAPI application (entry: src.api.main:app)
+│       └── ui/web/mineralvision-app # React + TypeScript web app
+├── MineralVision_Enhanced/          # Lakehouse + geospatial middleware
+├── MineralVision_WALDO_Production_Package/  # WALDO detection services
 ├── infrastructure/                  # Kubernetes, Helm, Terraform
-├── tests/                          # Pytest test suite
-└── docs/                           # Documentation
+├── tests/                           # Pytest test suite
+└── docs/                            # Documentation (start with VISION.md)
 ```
 
-## Features
+## Development
 
-- Drillhole database with 3D visualization
-- Geostatistics (variography, kriging, block modeling)
-- Geophysical inversion (gravity, magnetics, EM)
-- Sensor fusion (magnetometry, radiometrics, LiDAR, GPR)
-- AI/ML prospectivity mapping
-- WALDO object detection (YOLOv8 + RF-DETR)
-- Digital twin with real-time streaming
-- Climate resilience analysis
-- Blockchain data provenance
-- Multi-user RBAC with JWT authentication
+```bash
+# Backend tests
+pytest tests/
 
-## API Documentation
-
-Once running, access the API docs at:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
-
-## Environment Variables
-
-See `.env.example` for all configuration options.
+# UI type-check / build (from the UI directory)
+npm run build
+```
 
 ## License
 
