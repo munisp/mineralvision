@@ -25,7 +25,9 @@ import {
   Brain,
   Video,
   Workflow,
+  Leaf,
   Gem,
+  Map as MapIcon,
 } from 'lucide-react';
 
 interface NavItem {
@@ -47,6 +49,7 @@ const navigation: NavItem[] = [
       { name: 'Drillholes', href: '/drillholes', icon: Database },
       { name: 'QA/QC', href: '/qaqc', icon: CheckCircle },
       { name: 'Cross Sections', href: '/cross-sections', icon: Layers },
+      { name: 'Map Explorer', href: '/map-explorer', icon: MapIcon },
     ],
   },
   {
@@ -67,6 +70,7 @@ const navigation: NavItem[] = [
   { name: 'AI Insights', href: '/ai-insights', icon: Brain },
   { name: 'Molmo2 Video', href: '/molmo2', icon: Video },
   { name: 'User Journeys', href: '/journeys', icon: Workflow },
+  { name: 'Crop Monitoring', href: '/crop-monitoring', icon: Leaf },
   { name: 'Mineral Monitoring', href: '/mineral-monitoring', icon: Gem },
 ];
 

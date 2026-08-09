@@ -22,6 +22,7 @@ import Molmo2Page from './pages/molmo2/Molmo2Page';
 import SettingsPage from './pages/settings/SettingsPage';
 import UsersPage from './pages/admin/UsersPage';
 import JourneysPage from './pages/journeys/JourneysPage';
+import MapExplorerPage from './pages/geology/MapExplorerPage';
 import MineralMonitoringPage from './pages/mineral-monitoring/MineralMonitoringPage';
 import { Toaster } from './components/ui/toaster';
 
@@ -67,6 +68,7 @@ function App() {
                                         <Route path="gnss" element={<GNSSPage />} />
                                                                                 <Route path="ai-insights" element={<AIInsightsPage />} />
                                                                                           <Route path="molmo2" element={<Molmo2Page />} />
+                                        <Route path="map-explorer" element={<MapExplorerPage />} />
                                         <Route path="journeys" element={<JourneysPage />} />
                                                                                 <Route path="mineral-monitoring" element={<MineralMonitoringPage />} />
                                                                                 <Route path="settings" element={<SettingsPage />} />
