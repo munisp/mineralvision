@@ -24,11 +24,17 @@ src/
 
 ### Backend endpoints consumed (all live — nothing mocked)
 
+NOTE (verified at runtime, see `docs/RUNTIME_QA.md`): the innovation routers are
+mounted at the server root WITHOUT the `/api` prefix, and the scene endpoint is
+a POST. MapLibre geojson sources have no tile-template support, so the 2D map
+fetches the viewport-covering z/x/y tiles via axios and `setData`s them
+(debounced on `moveend`).
+
 | Endpoint | Consumer |
 |---|---|
-| `GET /api/innovations/geotoolkit/tiles/features/{z}/{x}/{y}?layer=drillholes\|samples\|tenements` | MapLibre tiled-GeoJSON sources |
-| `GET /api/innovations/geotoolkit/targeting/tiles/{raster_id}/{z}/{x}/{y}.png` | Optional raster heatmap overlay |
-| `GET /api/innovations/geotoolkit/drillholes/scene` | Cesium collar points + grade-coloured trace polylines |
+| `GET /innovations/geotoolkit/tiles/features/{z}/{x}/{y}?layer=drillholes\|samples\|tenements` | Viewport tile fetches merged into MapLibre GeoJSON sources |
+| `GET /innovations/geotoolkit/targeting/tiles/{raster_id}/{z}/{x}/{y}` | Optional raster heatmap overlay (MapLibre raster source) |
+| `GET /api/drillholes` + `POST /innovations/geotoolkit/drillholes/scene` | Cesium collar points + grade-coloured assay-segment polylines |
 
 The app's existing axios instance (`src/services/api.ts`) supplies the base URL
 (`VITE_API_URL`, falling back to same origin / the Vite dev proxy at

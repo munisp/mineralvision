@@ -46,27 +46,12 @@ export const useAuthStore = create<AuthState>()(
 
             login: async (username: string, password: string) => {
               set({ isLoading: true, error: null });
-        
-              // Demo mode - allow login without backend for UI demonstration
-              if (username === 'admin' || username === 'demo') {
-                set({
-                  user: {
-                    id: '1',
-                    username: username,
-                    email: `${username}@mineralvision.ai`,
-                    firstName: username === 'admin' ? 'Admin' : 'Demo',
-                    lastName: 'User',
-                    roles: ['admin', 'resource_geologist'],
-                    tenantId: 'demo-tenant',
-                  },
-                  token: 'demo-token-' + Date.now(),
-                  isAuthenticated: true,
-                  isLoading: false,
-                  error: null,
-                });
-                return true;
-              }
-        
+
+              // Try the real backend first. Demo mode is only a fallback for
+              // 'admin'/'demo' when the backend is UNREACHABLE (network error),
+              // so that UI demos without a server still work. Credentials are
+              // never short-circuited while a backend is available.
+              let backendUnreachable = false;
               try {
                 const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
                   method: 'POST',
@@ -80,23 +65,44 @@ export const useAuthStore = create<AuthState>()(
                 }
 
                 const data = await response.json();
-          
+
                 set({
                   user: data.user,
-                  token: data.session.token,
+                  token: data.session?.token ?? data.access_token ?? data.accessToken,
                   isAuthenticated: true,
                   isLoading: false,
                   error: null,
                 });
-          
+
                 return true;
               } catch (error) {
-                set({
-                  isLoading: false,
-                  error: error instanceof Error ? error.message : 'Login failed',
-                });
-                return false;
+                backendUnreachable = error instanceof TypeError; // fetch network failure
+                if (!backendUnreachable || (username !== 'admin' && username !== 'demo')) {
+                  set({
+                    isLoading: false,
+                    error: error instanceof Error ? error.message : 'Login failed',
+                  });
+                  return false;
+                }
               }
+
+              // Offline demo fallback (backend unreachable + demo username).
+              set({
+                user: {
+                  id: '1',
+                  username: username,
+                  email: `${username}@mineralvision.ai`,
+                  firstName: username === 'admin' ? 'Admin' : 'Demo',
+                  lastName: 'User',
+                  roles: ['admin', 'resource_geologist'],
+                  tenantId: 'demo-tenant',
+                },
+                token: 'demo-token-' + Date.now(),
+                isAuthenticated: true,
+                isLoading: false,
+                error: null,
+              });
+              return true;
             },
 
       logout: () => {

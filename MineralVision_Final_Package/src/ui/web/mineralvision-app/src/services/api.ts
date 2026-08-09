@@ -50,6 +50,8 @@ export interface Drillhole {
     z: number;
   };
   totalDepth: number;
+  azimuth?: number;
+  dip?: number;
   status: string;
   assayCount: number;
 }
