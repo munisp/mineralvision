@@ -10,9 +10,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..',
                                 'MineralVision_Final_Package', 'src'))
 
 from api.innovations.target_ranking.logic import (
-    FEATURE_NAMES, extract_target_features, rank_targets,
-    permutation_importance, sequential_permutation_drops, explain_target,
+    FEATURE_NAMES,
+    explain_target,
+    extract_target_features,
     labels_from_grade_hits,
+    permutation_importance,
+    rank_targets,
+    sequential_permutation_drops,
 )
 
 
@@ -20,12 +24,12 @@ def make_dataset(seed=7, n=200, n_noise=4):
     """Two informative features (max_grade_gpt, grade_thickness) + noise."""
     rng = np.random.default_rng(seed)
     p = len(FEATURE_NAMES) + n_noise
-    X = rng.normal(0.0, 1.0, size=(n, p))
+    x_feats = rng.normal(0.0, 1.0, size=(n, p))
     # informative: columns 1 (max grade) and 4 (grade_thickness)
-    logit = 2.5 * X[:, 1] + 2.0 * X[:, 4]
+    logit = 2.5 * x_feats[:, 1] + 2.0 * x_feats[:, 4]
     y = (logit + rng.normal(0, 0.5, n) > 0).astype(int)
     names = FEATURE_NAMES + [f"noise_{i}" for i in range(n_noise)]
-    return X, y, names
+    return x_feats, y, names
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +43,7 @@ def test_extract_target_features_real_numbers():
                    (100.0, 120.0, 5.0)],
         cutoff_gpt=1.0,
     )
-    d = dict(zip(FEATURE_NAMES, feats))
+    d = dict(zip(FEATURE_NAMES, feats, strict=False))
     assert d["n_samples"] == 3.0
     assert d["max_grade_gpt"] == pytest.approx(5.0)
     assert d["mean_grade_gpt"] == pytest.approx((0.2 + 3.0 + 5.0) / 3)
@@ -53,16 +57,16 @@ def test_extract_features_no_hits():
     feats = extract_target_features(0, 0, 0, 100.0,
                                     [(0.0, 50.0, 0.1), (50.0, 100.0, 0.3)],
                                     cutoff_gpt=1.0)
-    d = dict(zip(FEATURE_NAMES, feats))
+    d = dict(zip(FEATURE_NAMES, feats, strict=False))
     assert d["thickness_above_cutoff"] == 0.0
     assert d["depth_to_first_hit"] == pytest.approx(100.0)
 
 
 def test_labels_from_grade_hits():
-    X = np.zeros((3, len(FEATURE_NAMES)))
-    X[0, FEATURE_NAMES.index("thickness_above_cutoff")] = 5.0
-    X[1, FEATURE_NAMES.index("thickness_above_cutoff")] = 0.5
-    y = labels_from_grade_hits(X, min_thickness=1.0)
+    x_feats = np.zeros((3, len(FEATURE_NAMES)))
+    x_feats[0, FEATURE_NAMES.index("thickness_above_cutoff")] = 5.0
+    x_feats[1, FEATURE_NAMES.index("thickness_above_cutoff")] = 0.5
+    y = labels_from_grade_hits(x_feats, min_thickness=1.0)
     assert list(y) == [1, 0, 0]
 
 
@@ -76,33 +80,33 @@ def test_planted_signal_ranks_top():
     # memorize residual noise (which would make in-sample scores arbitrary).
     rng = np.random.default_rng(7)
     n, p = 200, len(FEATURE_NAMES) + 4
-    X = np.zeros((n, p))
-    X[:, 1] = rng.normal(0, 1, n)
-    X[:, 4] = rng.normal(0, 1, n)
-    y = (2.5 * X[:, 1] + 2.0 * X[:, 4] > 0).astype(int)
+    x_feats = np.zeros((n, p))
+    x_feats[:, 1] = rng.normal(0, 1, n)
+    x_feats[:, 4] = rng.normal(0, 1, n)
+    y = (2.5 * x_feats[:, 1] + 2.0 * x_feats[:, 4] > 0).astype(int)
     # plant an unambiguous top target: extreme informative feature values
-    X[0, 1] = 6.0
-    X[0, 4] = 6.0
+    x_feats[0, 1] = 6.0
+    x_feats[0, 4] = 6.0
     y[0] = 1
     for model_type in ("gradient_boosting", "random_forest"):
-        result = rank_targets(X, y, seed=42, model_type=model_type)
+        result = rank_targets(x_feats, y, seed=42, model_type=model_type)
         assert result.order[0] == 0, model_type
         assert result.scores[0] == pytest.approx(result.scores.max())
         assert result.baseline_score > 0.99  # dataset is perfectly learnable
 
 
 def test_ranking_stable_with_seed():
-    X, y, _ = make_dataset()
-    r1 = rank_targets(X, y, seed=123, model_type="random_forest")
-    r2 = rank_targets(X, y, seed=123, model_type="random_forest")
+    x_feats, y, _ = make_dataset()
+    r1 = rank_targets(x_feats, y, seed=123, model_type="random_forest")
+    r2 = rank_targets(x_feats, y, seed=123, model_type="random_forest")
     assert np.array_equal(r1.order, r2.order)
     assert np.allclose(r1.scores, r2.scores)
 
 
 def test_ranking_rejects_single_class():
-    X, y, _ = make_dataset()
+    x_feats, y, _ = make_dataset()
     with pytest.raises(ValueError):
-        rank_targets(X, np.zeros(len(y), dtype=int))
+        rank_targets(x_feats, np.zeros(len(y), dtype=int))
 
 
 # ---------------------------------------------------------------------------
@@ -110,9 +114,9 @@ def test_ranking_rejects_single_class():
 # ---------------------------------------------------------------------------
 
 def test_importance_identifies_informative_features():
-    X, y, names = make_dataset()
-    result = rank_targets(X, y, seed=42)
-    imp = permutation_importance(result.model, X, y, seed=42, n_repeats=8)
+    x_feats, y, names = make_dataset()
+    result = rank_targets(x_feats, y, seed=42)
+    imp = permutation_importance(result.model, x_feats, y, seed=42, n_repeats=8)
     order = np.argsort(-imp["importances"])
     top2 = set(order[:2].tolist())
     assert top2 == {1, 4}  # the two informative columns
@@ -122,9 +126,9 @@ def test_importance_identifies_informative_features():
 
 def test_importance_sums_match_total_score_drop():
     """Sequential permutation drops telescope: sum == baseline - final."""
-    X, y, names = make_dataset()
-    result = rank_targets(X, y, seed=42)
-    drops, baseline, final = sequential_permutation_drops(result.model, X, y,
+    x_feats, y, names = make_dataset()
+    result = rank_targets(x_feats, y, seed=42)
+    drops, baseline, final = sequential_permutation_drops(result.model, x_feats, y,
                                                           seed=42)
     assert drops.sum() == pytest.approx(baseline - final, abs=1e-9)
     # and the sequential drops are consistent with standalone importance:
@@ -136,10 +140,10 @@ def test_importance_sums_match_total_score_drop():
 
 
 def test_permutation_importance_deterministic():
-    X, y, _ = make_dataset()
-    result = rank_targets(X, y, seed=42)
-    a = permutation_importance(result.model, X, y, seed=9, n_repeats=5)
-    b = permutation_importance(result.model, X, y, seed=9, n_repeats=5)
+    x_feats, y, _ = make_dataset()
+    result = rank_targets(x_feats, y, seed=42)
+    a = permutation_importance(result.model, x_feats, y, seed=9, n_repeats=5)
+    b = permutation_importance(result.model, x_feats, y, seed=9, n_repeats=5)
     assert np.allclose(a["importances"], b["importances"])
 
 
@@ -148,13 +152,13 @@ def test_permutation_importance_deterministic():
 # ---------------------------------------------------------------------------
 
 def test_explain_target_top_driver_and_direction():
-    X, y, names = make_dataset()
+    x_feats, y, names = make_dataset()
     # plant target with extreme max_grade (feature 1)
-    X[5, 1] = 5.0
-    X[5, 4] = 0.0
+    x_feats[5, 1] = 5.0
+    x_feats[5, 4] = 0.0
     y[5] = 1
-    result = rank_targets(X, y, seed=42)
-    out = explain_target(result.model, X, 5, feature_names=names,
+    result = rank_targets(x_feats, y, seed=42)
+    out = explain_target(result.model, x_feats, 5, feature_names=names,
                          seed=42, top_k=3)
     assert out["target_index"] == 5
     assert 0.0 <= out["base_score"] <= 1.0
@@ -168,10 +172,10 @@ def test_explain_target_top_driver_and_direction():
 
 
 def test_explain_target_deterministic():
-    X, y, names = make_dataset()
-    result = rank_targets(X, y, seed=42)
-    a = explain_target(result.model, X, 3, feature_names=names, seed=1)
-    b = explain_target(result.model, X, 3, feature_names=names, seed=1)
+    x_feats, y, names = make_dataset()
+    result = rank_targets(x_feats, y, seed=42)
+    a = explain_target(result.model, x_feats, 3, feature_names=names, seed=1)
+    b = explain_target(result.model, x_feats, 3, feature_names=names, seed=1)
     assert a == b
 
 
@@ -180,16 +184,16 @@ def test_explain_target_deterministic():
 # ---------------------------------------------------------------------------
 
 def test_router_rank_endpoint():
+    from api.innovations.target_ranking import router
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from api.innovations.target_ranking import router
 
-    X, y, names = make_dataset(n=200)
+    x_feats, y, names = make_dataset(n=200)
     app = FastAPI()
     app.include_router(router)
     client = TestClient(app)
     r = client.post("/innovations/target_ranking/rank", json={
-        "features": X.tolist(), "labels": y.tolist(),
+        "features": x_feats.tolist(), "labels": y.tolist(),
         "feature_names": names, "seed": 42, "n_repeats": 6,
     })
     assert r.status_code == 200

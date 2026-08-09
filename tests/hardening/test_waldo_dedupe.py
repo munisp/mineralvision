@@ -5,7 +5,6 @@ primitives from the canonical MineralVision_WALDO_Production_Package
 detections when the heavy ML stack is unavailable.
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -61,10 +60,11 @@ def test_molmo_fusion_imports_canonical_primitives():
 
 def test_jepa_detection_returns_nothing_without_detector():
     """No fabricated detections when canonical detector unavailable."""
-    from src.api.jepa.waldo_sam3_integration import (
-        WALDOJEPAIntegration, DetectionTarget,
-    )
     from src.api.jepa.vjepa_integration import create_feature_extractor
+    from src.api.jepa.waldo_sam3_integration import (
+        DetectionTarget,
+        WALDOJEPAIntegration,
+    )
 
     extractor = create_feature_extractor()
     integration = WALDOJEPAIntegration(
@@ -99,8 +99,6 @@ def test_canonical_classes_are_shared_singletons():
     except ImportError:
         pytest.skip("canonical waldo_integration heavy deps unavailable")
 
-    import src.api.molmo.waldo_molmo_fusion as molmo
-    import src.api.jepa.waldo_sam3_integration as jepa
 
     # The adapter loaders import from waldo_integration — same module objects
     assert "waldo_integration.detection" in sys.modules

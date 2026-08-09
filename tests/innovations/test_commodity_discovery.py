@@ -200,7 +200,7 @@ def test_brine_mg_li_classification_boundaries(client):
     resp = client.post(f"{PREFIX}/lithium/brine", json={"samples": samples})
     assert resp.status_code == 200
     results = resp.json()["results"]
-    for r, (_, expected) in zip(results, cases):
+    for r, (_, expected) in zip(results, cases, strict=False):
         assert r["mg_li_interpretation"] == expected
     # no-lithium sample
     resp2 = client.post(f"{PREFIX}/lithium/brine", json={"samples": [
@@ -282,9 +282,9 @@ def test_deposit_types_catalogue(client):
             "porphyry_gold", "placer"} <= gold_types
     oro = next(g for g in body["gold"] if g["deposit_type"] == "orogenic")
     assert set(oro["diagnostic_elements"]["primary"]) == {"Au", "As", "Sb", "W", "Bi", "Te"}
-    li_types = {l["deposit_type"] for l in body["lithium"]}
+    li_types = {dep["deposit_type"] for dep in body["lithium"]}
     assert {"pegmatite_lct", "brine_salar", "clay_hectorite"} <= li_types
-    lct = next(l for l in body["lithium"] if l["deposit_type"] == "pegmatite_lct")
+    lct = next(dep for dep in body["lithium"] if dep["deposit_type"] == "pegmatite_lct")
     assert "Li" in lct["diagnostic_elements"]["primary"]
 
 

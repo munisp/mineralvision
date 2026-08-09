@@ -5,12 +5,6 @@ import json
 import bcrypt
 import httpx
 import pytest
-from fastapi import Depends, FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from api.innovations.integration_hub import router
 from api.innovations.integration_hub.db import Base, get_db
 from api.innovations.integration_hub.logic import (
@@ -24,6 +18,11 @@ from api.innovations.integration_hub.logic import (
     verify_signature,
 )
 from api.innovations.integration_hub.models import ApiKeyModel
+from fastapi import Depends, FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture()
@@ -163,11 +162,11 @@ class TestApiKeyDependency:
         write_dep = build_api_key_dependency(get_db, "write")
 
         @app.get("/probe/read")
-        def probe_read(key: ApiKeyModel = Depends(read_dep)):
+        def probe_read(key: ApiKeyModel = Depends(read_dep)):  # noqa: B008
             return {"ok": True, "key": api_key_to_dict(key)}
 
         @app.post("/probe/write")
-        def probe_write(key: ApiKeyModel = Depends(write_dep)):
+        def probe_write(key: ApiKeyModel = Depends(write_dep)):  # noqa: B008
             return {"ok": True}
 
         return TestClient(app)

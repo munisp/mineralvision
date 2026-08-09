@@ -6,18 +6,16 @@ import json
 import zipfile
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from api.innovations.submission_packager import router
 from api.innovations.submission_packager.logic import (
     MANIFEST_NAME,
-    build_manifest,
     package_submission,
     render_files,
     validate_submission,
 )
 from api.innovations.submission_packager.templates import TEMPLATES
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 FULL_DATA = {
     "tenement_details": {"tenement_id": "E70/5432", "holder": "MV Exploration Pty Ltd",

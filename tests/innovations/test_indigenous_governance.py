@@ -3,12 +3,6 @@
 from datetime import datetime
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from api.auth_middleware import TokenPayload, require_auth
 from api.innovations.indigenous_governance import router
 from api.innovations.indigenous_governance.db import Base, get_db
@@ -18,6 +12,11 @@ from api.innovations.indigenous_governance.logic import (
     tier_permits_role,
 )
 from api.innovations.indigenous_governance.models import AccessAuditModel
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 def make_user(username: str, role: str) -> TokenPayload:

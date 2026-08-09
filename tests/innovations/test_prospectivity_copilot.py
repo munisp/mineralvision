@@ -11,11 +11,13 @@ from sqlalchemy.orm import sessionmaker
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..',
                                 'MineralVision_Final_Package', 'src'))
 
-from api.database import Base, ProjectModel, DrillholeModel, SampleModel
+from api.database import Base, DrillholeModel, ProjectModel, SampleModel
 from api.innovations.prospectivity_copilot.logic import (
-    parse_query, explain_query, execute_query, UNIT_TO_GPT,
+    UNIT_TO_GPT,
+    execute_query,
+    explain_query,
+    parse_query,
 )
-
 
 # ---------------------------------------------------------------------------
 # AST tests (>= 15 phrases)
@@ -192,8 +194,8 @@ def test_explanation_is_plain_language():
 def session():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    s = Session()
+    session_factory = sessionmaker(bind=engine)
+    s = session_factory()
 
     gold = ProjectModel(id=str(uuid.uuid4()), name="Golden Mile",
                         location="Kalgoorlie, Western Australia",
@@ -288,9 +290,9 @@ def test_execute_no_match(session):
 # ---------------------------------------------------------------------------
 
 def test_router_parse_endpoint():
+    from api.innovations.prospectivity_copilot import router
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from api.innovations.prospectivity_copilot import router
 
     app = FastAPI()
     app.include_router(router)

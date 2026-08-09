@@ -1,16 +1,15 @@
 """Deterministic tests for the field_sync innovation (B5-18)."""
 
 import pytest
+from api.innovations.field_sync import router
+from api.innovations.field_sync.db import Base, get_db
+from api.innovations.field_sync.logic import FieldSync
+from api.innovations.field_sync.models import ConflictModel, SyncOpModel
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from api.innovations.field_sync import router
-from api.innovations.field_sync.db import Base, get_db
-from api.innovations.field_sync.logic import FieldSync
-from api.innovations.field_sync.models import ConflictModel, SyncOpModel
 
 
 @pytest.fixture()

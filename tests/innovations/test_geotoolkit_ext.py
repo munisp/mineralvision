@@ -2,7 +2,6 @@
 
 import base64
 import io
-import math
 import os
 import sys
 

@@ -6,12 +6,6 @@ import json
 from datetime import datetime
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from api.innovations.custody_ledger import router
 from api.innovations.custody_ledger.db import Base, get_db
 from api.innovations.custody_ledger.logic import (
@@ -23,6 +17,11 @@ from api.innovations.custody_ledger.logic import (
     sign_entry,
 )
 from api.innovations.custody_ledger.models import CustodyLedgerEntry
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 TEST_KEY = b"test-ledger-hmac-key-0123456789abcdef"
 
@@ -81,7 +80,7 @@ class TestAppendAndChain:
         entries = _append_full_chain(ledger)
         assert [e.id for e in entries] == [1, 2, 3, 4]
         assert entries[0].prev_hash == GENESIS_HASH
-        for prev, cur in zip(entries, entries[1:]):
+        for prev, cur in zip(entries, entries[1:], strict=False):
             assert cur.prev_hash == prev.entry_hash
 
     def test_stored_hash_matches_formula(self, ledger):

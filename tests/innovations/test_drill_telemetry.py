@@ -2,15 +2,13 @@
 
 import numpy as np
 import pytest
+from api.innovations.drill_telemetry import logic, router
+from api.innovations.drill_telemetry.models import Base, get_session
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from api.innovations.drill_telemetry import router
-from api.innovations.drill_telemetry.models import Base, get_session
-from api.innovations.drill_telemetry import logic
 
 
 def _three_regime_trace(seed=7):

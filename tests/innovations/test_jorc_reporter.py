@@ -2,12 +2,9 @@
 
 import numpy as np
 import pytest
+from api.innovations.jorc_reporter import logic, router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from api.innovations.jorc_reporter import router
-from api.innovations.jorc_reporter import logic
-
 
 VARIOGRAM_RANGE = 100.0
 BLOCK_VOLUME = 10.0 * 10.0 * 5.0  # 500 m3

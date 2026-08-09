@@ -2,11 +2,9 @@
 
 import numpy as np
 import pytest
+from api.innovations.satellite_change_detection import logic, router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from api.innovations.satellite_change_detection import router
-from api.innovations.satellite_change_detection import logic
 
 
 def _scenes(seed=11, shape=(2, 30, 30)):
