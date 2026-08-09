@@ -162,8 +162,8 @@ def sync_to_lakehouse(session, base_path: Optional[str] = None) -> Dict[str, Any
         for s in samples
     ]
 
-    storage.write_parquet(dh_rows, "drillholes/drillholes.parquet")
-    storage.write_parquet(sample_rows, "samples/samples.parquet")
+    storage.write_parquet("drillholes/drillholes.parquet", dh_rows)
+    storage.write_parquet("samples/samples.parquet", sample_rows)
     return {
         "base_path": base,
         "drillholes": {
