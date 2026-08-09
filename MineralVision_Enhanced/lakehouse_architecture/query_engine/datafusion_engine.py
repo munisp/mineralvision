@@ -130,6 +130,23 @@ class DataFusionEngine:
                 self.logger.info(f"Successfully registered DataFrame table '{name}'")
                 return True
 
+            # Path-based registration with no data files present: register an
+            # empty in-memory table instead so downstream queries return an
+            # empty result rather than a hard IO failure.
+            if isinstance(path, str) and not self._path_has_files(path, format_type):
+                os.makedirs(path, exist_ok=True)
+                # engines require at least one column for registration
+                empty_df = pd.DataFrame({"__empty__": pd.Series(dtype=str)})
+                if self._duckdb_conn is not None:
+                    self._duckdb_conn.register(name, empty_df)
+                elif self._ctx is not None:
+                    self._ctx.register_dataframe(name, empty_df)
+                self.logger.warning(
+                    f"No {format_type} files found at '{path}'; registered "
+                    f"empty table '{name}'"
+                )
+                return True
+
             if self._ctx is not None:
                 if format_type.lower() == 'parquet':
                     self._ctx.register_parquet(name, path)
@@ -151,6 +168,19 @@ class DataFusionEngine:
             self.logger.error(f"Failed to register table '{name}': {str(e)}")
             return False
     
+    @staticmethod
+    def _path_has_files(path: str, format_type: str) -> bool:
+        """True when a data path exists and contains files of the format."""
+        if not os.path.exists(path):
+            return False
+        ext = {"parquet": ".parquet", "csv": ".csv"}.get(format_type.lower(), "")
+        if os.path.isfile(path):
+            return path.endswith(ext) if ext else True
+        for _, _, files in os.walk(path):
+            if any(f.endswith(ext) for f in files) if ext else files:
+                return True
+        return False
+
     def execute_sql(self, query: str) -> Tuple[List[str], List[List[Any]]]:
         """
         Execute a SQL query using DataFusion or fallback engine.

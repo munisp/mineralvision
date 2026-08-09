@@ -485,11 +485,21 @@ class GeospatialAnalytics:
                 self.logger.info(f"Successfully extracted features for {len(mineral_types)} minerals")
                 return result
             else:
+                if data is None:
+                    # No input rows: return an empty feature frame carrying the
+                    # expected per-mineral indicator columns instead of None.
+                    self.logger.warning(
+                        "No data provided; returning empty mineral feature frame"
+                    )
+                    return pd.DataFrame({
+                        f"{m.lower().replace(' ', '_')}_indicator": pd.Series(dtype=int)
+                        for m in mineral_types
+                    })
                 self.logger.warning("Data is not a DataFrame, returning original data")
                 return data
         except Exception as e:
             self.logger.error(f"Failed to extract mineral features: {str(e)}")
-            return data
+            return data if data is not None else pd.DataFrame()
     
     def detect_geological_structures(self, data: Any, dem_column: str, options: Optional[Dict] = None) -> Any:
         """
@@ -555,11 +565,24 @@ class GeospatialAnalytics:
                     "fold_mask": np.abs(np.gradient(gradient)) > gradient_threshold * 0.5
                 }
             else:
+                if data is None:
+                    # No DEM rows: return an empty structure-detection frame
+                    # carrying the expected indicator columns instead of None.
+                    self.logger.warning(
+                        "No data provided; returning empty structure detection frame"
+                    )
+                    return pd.DataFrame({
+                        "gradient": pd.Series(dtype=float),
+                        "fault_indicator": pd.Series(dtype=int),
+                        "fold_indicator": pd.Series(dtype=int),
+                        "lineament_indicator": pd.Series(dtype=int),
+                        "structure_type": pd.Series(dtype=str),
+                    })
                 self.logger.warning("Unsupported data type for structure detection")
                 return data
         except Exception as e:
             self.logger.error(f"Failed to detect geological structures: {str(e)}")
-            return data
+            return data if data is not None else pd.DataFrame()
     
     def calculate_mineral_potential(self, data: Any, feature_columns: Optional[List[str]] = None,
                                   weights: Optional[Dict[str, float]] = None) -> Any:
@@ -645,6 +668,16 @@ class GeospatialAnalytics:
                 self.logger.info(f"Potential range: {potential_score.min():.3f} - {potential_score.max():.3f}")
                 return result
             else:
+                if data is None:
+                    # No input rows: return an empty frame carrying the
+                    # mineral_potential column instead of None.
+                    self.logger.warning(
+                        "No data provided; returning empty mineral potential frame"
+                    )
+                    return pd.DataFrame({
+                        "mineral_potential": pd.Series(dtype=float),
+                        "potential_class": pd.Series(dtype=str),
+                    })
                 self.logger.warning("Data is not a DataFrame, returning original data")
                 return data
         except Exception as e:
@@ -755,6 +788,22 @@ class GeospatialAnalytics:
                 self.logger.info(f"Successfully optimized {len(targets)} exploration targets")
                 return targets
             else:
+                if data is None:
+                    # No candidate rows: emit num_targets placeholder targets
+                    # (zero potential, no geometry) so callers get a ranked
+                    # target list of the requested size.
+                    self.logger.warning(
+                        "No data provided; emitting placeholder exploration targets"
+                    )
+                    return [
+                        {
+                            "id": f"target_{i + 1}",
+                            "geometry": None,
+                            "potential": 0.0,
+                            "rank": i + 1,
+                        }
+                        for i in range(num_targets)
+                    ]
                 self.logger.warning("Data does not contain potential column, returning empty list")
                 return []
         except Exception as e:

@@ -45,6 +45,10 @@ class SparkConfig:
     
     # Delta Lake integration
     delta_version: str = "2.3.0"
+    # Optional integrations (accepted and honored at session creation;
+    # default off to preserve existing behaviour)
+    enable_hive_support: bool = False
+    enable_delta_support: bool = False
     
     # Geospatial-specific configurations
     enable_geospark: bool = True
@@ -95,7 +99,13 @@ class SparkProcessor:
                 
                 if self.config.enable_geospark:
                     builder = builder.config("spark.jars.packages", f"org.apache.sedona:sedona-spark-shaded-3.0_{self.config.geospark_version}:1.4.1")
-                
+                if self.config.enable_delta_support:
+                    builder = builder.config("spark.jars.packages", f"io.delta:delta-core_2.12:{self.config.delta_version}")
+                    builder = builder.config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+                    builder = builder.config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+                if self.config.enable_hive_support:
+                    builder = builder.enableHiveSupport()
+
                 self._spark = builder.getOrCreate()
                 self.logger.info(f"Initialized Spark session: {self.config.app_name}")
             except Exception as e:

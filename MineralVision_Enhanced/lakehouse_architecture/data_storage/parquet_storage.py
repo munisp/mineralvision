@@ -28,11 +28,19 @@ class ParquetConfig:
     page_size: int = 1 * 1024 * 1024
     enable_dictionary: bool = True
     enable_statistics: bool = True
+    # Backward-compatible alias for enable_dictionary (legacy callers pass
+    # enable_dictionary_encoding=...); when explicitly set it wins.
+    enable_dictionary_encoding: Optional[bool] = None
     log_level: str = "INFO"
     spatial_partition_columns: List[str] = field(default_factory=lambda: ["tile_id", "resolution"])
-    
+
     def __post_init__(self):
         """Initialize derived paths and create directories if they don't exist."""
+        if self.enable_dictionary_encoding is not None:
+            self.enable_dictionary = self.enable_dictionary_encoding
+        else:
+            # keep the two names consistent for readers
+            self.enable_dictionary_encoding = self.enable_dictionary
         os.makedirs(self.base_path, exist_ok=True)
         logging.basicConfig(level=getattr(logging, self.log_level), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         self.logger = logging.getLogger("ParquetStorage")
