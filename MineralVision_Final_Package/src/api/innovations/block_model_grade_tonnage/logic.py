@@ -24,13 +24,23 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
-from api.geostatistics.kriging import (
-    OrdinaryKriging,
-    Point3D as _CorePoint3D,
-    SearchEllipsoid,
-    SearchParameters,
-    SearchType,
-)
+try:
+    from src.api.geostatistics.kriging import (
+        OrdinaryKriging,
+        Point3D as _CorePoint3D,
+        SearchEllipsoid,
+        SearchParameters,
+        SearchType,
+    )
+except ImportError:  # test harness inserts src/ directly on sys.path
+    from api.geostatistics.kriging import (
+        OrdinaryKriging,
+        Point3D as _CorePoint3D,
+        SearchEllipsoid,
+        SearchParameters,
+        SearchType,
+    )
+
 from ..resource_monte_carlo.logic import VariogramSpec
 
 

@@ -38,7 +38,11 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 
-from api.geostatistics.kriging import SearchEllipsoid
+try:
+    from src.api.geostatistics.kriging import SearchEllipsoid
+except ImportError:  # test harness inserts src/ directly on sys.path
+    from api.geostatistics.kriging import SearchEllipsoid
+
 
 
 class ResourceClass(str, Enum):

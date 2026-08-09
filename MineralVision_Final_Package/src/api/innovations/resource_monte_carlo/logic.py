@@ -36,7 +36,11 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-from api.geostatistics.kriging import VariogramModel as _CoreVariogramModel
+try:
+    from src.api.geostatistics.kriging import VariogramModel as _CoreVariogramModel
+except ImportError:  # test harness inserts src/ directly on sys.path
+    from api.geostatistics.kriging import VariogramModel as _CoreVariogramModel
+
 
 MAX_GRID_NODES = 500
 MAX_DATA_POINTS = 500

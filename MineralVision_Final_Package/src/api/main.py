@@ -252,6 +252,54 @@ app.include_router(journeys_router, tags=["journeys"])
 # WALDO proxy router
 app.include_router(waldo_router)
 
+# ---------------------------------------------------------------------------
+# Innovation routers (20 premiere features, each with its own /innovations/<name> prefix)
+# ---------------------------------------------------------------------------
+from .innovations.jorc_reporter import router as jorc_reporter_router
+from .innovations.qaqc_analyzer import router as qaqc_analyzer_router
+from .innovations.resource_monte_carlo import router as resource_monte_carlo_router
+from .innovations.block_model_grade_tonnage import router as block_model_grade_tonnage_router
+from .innovations.prospectivity_copilot import router as prospectivity_copilot_router
+from .innovations.target_ranking import router as target_ranking_router
+from .innovations.portfolio_optimizer import router as portfolio_optimizer_router
+from .innovations.geostat_drift_alerting import router as geostat_drift_alerting_router
+from .innovations.inversion_jobs import router as inversion_jobs_router
+from .innovations.hyperspectral_alteration import router as hyperspectral_alteration_router
+from .innovations.satellite_change_detection import router as satellite_change_detection_router
+from .innovations.drill_telemetry import router as drill_telemetry_router
+from .innovations.custody_ledger import router as custody_ledger_router
+from .innovations.esg_scanner import router as esg_scanner_router
+from .innovations.submission_packager import router as submission_packager_router
+from .innovations.indigenous_governance import router as indigenous_governance_router
+from .innovations.doc_intelligence import router as doc_intelligence_router
+from .innovations.field_sync import router as field_sync_router
+from .innovations.audit_collaboration import router as audit_collaboration_router
+from .innovations.integration_hub import router as integration_hub_router
+
+for _innovation_router in (
+    jorc_reporter_router,
+    qaqc_analyzer_router,
+    resource_monte_carlo_router,
+    block_model_grade_tonnage_router,
+    prospectivity_copilot_router,
+    target_ranking_router,
+    portfolio_optimizer_router,
+    geostat_drift_alerting_router,
+    inversion_jobs_router,
+    hyperspectral_alteration_router,
+    satellite_change_detection_router,
+    drill_telemetry_router,
+    custody_ledger_router,
+    esg_scanner_router,
+    submission_packager_router,
+    indigenous_governance_router,
+    doc_intelligence_router,
+    field_sync_router,
+    audit_collaboration_router,
+    integration_hub_router,
+):
+    app.include_router(_innovation_router)
+
 
 if __name__ == "__main__":
     import uvicorn

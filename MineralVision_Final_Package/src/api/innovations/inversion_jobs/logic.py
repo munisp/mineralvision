@@ -19,18 +19,33 @@ from typing import Any, Callable, Dict
 import numpy as np
 from sqlalchemy.orm import Session
 
-from api.geophysics.inversion import (
-    DepthWeighting,
-    ForwardModeler,
-    GaussNewtonSolver,
-    InversionMesh,
-    InversionParameters,
-    InversionType,
-    ObservationPoint,
-    Point3D,
-    RegularizationOperator,
-    SurveyData,
-)
+try:
+    from src.api.geophysics.inversion import (
+        DepthWeighting,
+        ForwardModeler,
+        GaussNewtonSolver,
+        InversionMesh,
+        InversionParameters,
+        InversionType,
+        ObservationPoint,
+        Point3D,
+        RegularizationOperator,
+        SurveyData,
+    )
+except ImportError:  # test harness inserts src/ directly on sys.path
+    from api.geophysics.inversion import (
+        DepthWeighting,
+        ForwardModeler,
+        GaussNewtonSolver,
+        InversionMesh,
+        InversionParameters,
+        InversionType,
+        ObservationPoint,
+        Point3D,
+        RegularizationOperator,
+        SurveyData,
+    )
+
 
 from .models import InversionJob
 
