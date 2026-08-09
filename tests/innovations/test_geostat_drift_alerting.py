@@ -10,10 +10,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..',
                                 'MineralVision_Final_Package', 'src'))
 
 from api.innovations.geostat_drift_alerting.logic import (
-    CUSUMDetector, EWMADetector, DriftMonitor, declustering_weights,
-    declustered_mean, estimate_sill,
+    CUSUMDetector,
+    DriftMonitor,
+    EWMADetector,
+    declustered_mean,
+    declustering_weights,
+    estimate_sill,
 )
-
 
 # ---------------------------------------------------------------------------
 # Detector unit behavior
@@ -22,7 +25,7 @@ from api.innovations.geostat_drift_alerting.logic import (
 def test_cusum_detects_step_shift():
     det = CUSUMDetector(mean=0.0, std=1.0, k=0.5, h=5.0)
     alert = None
-    for i, v in enumerate(np.full(30, 2.0)):  # +2 sigma step
+    for _i, v in enumerate(np.full(30, 2.0)):  # +2 sigma step
         alert = det.update(float(v))
         if alert:
             break
@@ -30,7 +33,7 @@ def test_cusum_detects_step_shift():
     assert alert["detector"] == "cusum"
     assert alert["direction"] == "up"
     # with z=2, k=0.5: S grows 1.5/step -> crosses h=5 on step 4
-    assert i == 3
+    assert _i == 3
     assert alert["magnitude"] > 5.0
 
 
@@ -97,7 +100,6 @@ def test_estimate_sill_iid_equals_variance():
 
 def test_estimate_sill_spatial_variogram():
     # spatially smooth field: low semivariance at short lags, sill at range
-    rng = np.random.default_rng(5)
     gx, gy = np.meshgrid(np.linspace(0, 10, 12), np.linspace(0, 10, 12))
     coords = np.column_stack([gx.ravel(), gy.ravel()])
     values = np.sin(gx.ravel() / 2.0) + np.cos(gy.ravel() / 2.0)
@@ -169,9 +171,9 @@ def test_alerts_accumulate_with_timestamps():
 # ---------------------------------------------------------------------------
 
 def test_router_stream_lifecycle():
+    from api.innovations.geostat_drift_alerting import router
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from api.innovations.geostat_drift_alerting import router
 
     app = FastAPI()
     app.include_router(router)

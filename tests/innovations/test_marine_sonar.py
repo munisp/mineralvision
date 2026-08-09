@@ -2,10 +2,9 @@
 
 import numpy as np
 import pytest
+from api.innovations.marine_sonar import logic, router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from api.innovations.marine_sonar import logic, router
 
 SEED = 7
 GRID = 60  # 60x60 cells, 2 m cell size -> 120 m square patch
@@ -21,7 +20,7 @@ def _synthetic_seafloor():
     chan = np.exp(-((yy - 20) ** 2) / (2 * 2.0 ** 2)) * 6.0
     depth += chan
     # pinnacle at (row 42, col 40): 8 m high, 3-cell sigma
-    pin = np.exp(-(((yy - 42) ** 2 + (xx - 40) ** 2)) / (2 * 3.0 ** 2)) * 8.0
+    pin = np.exp(-((yy - 42) ** 2 + (xx - 40) ** 2) / (2 * 3.0 ** 2)) * 8.0
     depth -= pin
     return depth
 
@@ -122,7 +121,7 @@ def test_placer_scores_highest_in_trap_geometry():
                                      model="placer_gold")["score_grid"]
     # plant a rugged bedrock trap (depression with sharp rims) at (30,30)
     yy, xx = np.mgrid[0:GRID, 0:GRID]
-    trap = np.exp(-(((yy - 30) ** 2 + (xx - 30) ** 2)) / (2 * 3.0 ** 2)) * 5.0
+    trap = np.exp(-((yy - 30) ** 2 + (xx - 30) ** 2) / (2 * 3.0 ** 2)) * 5.0
     depth2 = depth + trap
     terr2 = logic.terrain_derivatives(depth2, cell_size=CELL)
     res = logic.score_targets(depth2, terr2["rugosity"], terr2["slope"],

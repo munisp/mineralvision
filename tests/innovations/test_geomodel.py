@@ -24,10 +24,9 @@ for p in (REPO_ROOT, FINAL_PKG, SRC):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from src.api.innovations.geomodel import router, engine
+from fastapi import FastAPI  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from src.api.innovations.geomodel import engine, router  # noqa: E402
 
 rng = np.random.default_rng(42)
 

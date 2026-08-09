@@ -1,9 +1,6 @@
 """Deterministic tests for the doc_intelligence innovation (B5-17)."""
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from api.innovations.doc_intelligence import router
 from api.innovations.doc_intelligence.logic import (
     extract_all,
@@ -13,6 +10,8 @@ from api.innovations.doc_intelligence.logic import (
     extract_hole_ids,
     extract_intervals,
 )
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 FIXTURE = """
 RIDGE A PROSPECT - RC DRILLING SUMMARY REPORT
@@ -92,7 +91,7 @@ class TestDates:
         assert "2025-03-10" in dates  # ISO + numeric 10/03/2025 deduped by span
         iso = next(d for d in extract_dates(FIXTURE) if d["date"] == "2025-03-15")
         assert iso["confidence"] == 0.9
-        numeric = [d for d in extract_dates("on 05/06/2024 drilling")]
+        numeric = list(extract_dates("on 05/06/2024 drilling"))
         assert numeric[0] == {"date": "2024-06-05", "confidence": 0.7, "span": [3, 13]}
 
 

@@ -204,14 +204,14 @@ def test_schedule_assigns_all_two_opt_improves_and_export():
     for rig_id in ("R1", "R2"):
         entries = sorted([e for e in body["schedule"] if e["rig_id"] == rig_id],
                          key=lambda e: e["start_day"])
-        for a, b in zip(entries, entries[1:]):
+        for a, b in zip(entries, entries[1:], strict=False):
             assert b["start_day"] >= a["end_day"] - 1e-9
 
     # export CSV + JSON
     rc = client.get(f"{BASE}/campaign/export",
                     params={"plan_id": "test-sched", "format": "csv"})
     assert rc.status_code == 200
-    lines = [l for l in rc.text.strip().splitlines()]
+    lines = list(rc.text.strip().splitlines())
     assert lines[0].startswith("hole_id")
     assert len(lines) == 9  # header + 8 holes
     rj = client.get(f"{BASE}/campaign/export",

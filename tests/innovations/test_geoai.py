@@ -11,11 +11,10 @@ import sys
 
 import numpy as np
 import pytest
+from api.innovations.geoai import core
+from api.innovations.geoai import router as geoai_router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from api.innovations.geoai import router as geoai_router
-from api.innovations.geoai import core
 
 
 @pytest.fixture(scope="module")

@@ -2,11 +2,9 @@
 
 import numpy as np
 import pytest
+from api.innovations.resource_monte_carlo import logic, router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from api.innovations.resource_monte_carlo import router
-from api.innovations.resource_monte_carlo import logic
 
 SPEC = logic.VariogramSpec(model="spherical", nugget=0.1,
                            contribution=0.9, range=50.0)
@@ -20,7 +18,8 @@ def _data():
     for i in range(4):
         for j in range(2):
             coords.append([i * 20.0, j * 20.0, 0.0])
-            values.append(vals[k]); k += 1
+            values.append(vals[k])
+            k += 1
     return np.array(coords), np.array(values)
 
 
@@ -158,7 +157,7 @@ def _payload(seed=42, n_real=100):
     g = _grid()
     return {
         "data": [{"x": c[0], "y": c[1], "z": c[2], "value": v}
-                 for c, v in zip(dc, dv)],
+                 for c, v in zip(dc, dv, strict=False)],
         "grid": [{"x": c[0], "y": c[1], "z": c[2], "tonnage": 1000.0}
                  for c in g],
         "variogram": {"model": "spherical", "nugget": 0.1,

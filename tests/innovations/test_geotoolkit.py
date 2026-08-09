@@ -25,11 +25,10 @@ for p in (REPO_ROOT, FINAL_PKG, SRC):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from src.api.innovations.geotoolkit import router as geotoolkit_router
-from src.api.innovations.geotoolkit import core as gcore
+from fastapi import FastAPI  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from src.api.innovations.geotoolkit import core as gcore  # noqa: E402
+from src.api.innovations.geotoolkit import router as geotoolkit_router  # noqa: E402
 
 rng = np.random.default_rng(42)
 
@@ -287,7 +286,7 @@ def test_profile_planar_dtm_matches_plane():
     assert r.status_code == 200
     body = r.json()
     assert body["total_length"] == pytest.approx(1000.0, abs=1e-9)
-    for d, x, y, e in zip(body["distance"], body["x"], body["y"], body["elevation"]):
+    for _d, x, y, e in zip(body["distance"], body["x"], body["y"], body["elevation"], strict=False):
         assert e == pytest.approx(100 + 0.5 * x - 0.25 * y, abs=1e-9)
     # straight line: x advances monotonically with distance
     assert body["x"][-1] == pytest.approx(900.0, abs=1e-9)
@@ -327,7 +326,7 @@ def test_targeting_heatmap_honors_samples():
     pts = rng.uniform(0, 1000, size=(n, 2))
     vals = (np.sin(pts[:, 0] / 150.0) + np.cos(pts[:, 1] / 200.0)).tolist()
     samples = [{"x": float(x), "y": float(y), "value": float(v)}
-               for (x, y), v in zip(pts, vals)]
+               for (x, y), v in zip(pts, vals, strict=False)]
     r = client.post("/innovations/geotoolkit/targeting/heatmap",
                     json={"samples": samples, "grid_size": 32,
                           "colormap": "iron-oxide", "method": "auto"})
@@ -339,7 +338,7 @@ def test_targeting_heatmap_honors_samples():
     bounds = gcore.RASTER_REGISTRY[rid].bounds
 
     # Surface honors sample values at sample points (bilinear probe).
-    for (x, y), v in zip(pts, vals):
+    for (x, y), v in zip(pts, vals, strict=False):
         est = gcore.bilinear_sample(grid, bounds,
                                     np.array([x]), np.array([y]))[0]
         assert est == pytest.approx(v, abs=0.15 * (max(vals) - min(vals)) + 0.05)

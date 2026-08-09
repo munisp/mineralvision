@@ -27,13 +27,13 @@ class TestDeltaLakeStorage:
     def test_storage_initialization(self, temp_dir):
         """Test Delta Lake storage initialization."""
 
-        storage = DeltaLakeStorage(DeltaLakeConfig(base_path=temp_dir))
+        storage = DeltaLakeStorage(DeltaLakeConfig(base_path=os.path.join(temp_dir, "delta_init")))
         assert storage is not None
     @pytest.mark.unit
     def test_create_table(self, temp_dir):
         """Test table creation."""
 
-        storage = DeltaLakeStorage(DeltaLakeConfig(base_path=temp_dir))
+        storage = DeltaLakeStorage(DeltaLakeConfig(base_path=os.path.join(temp_dir, "delta_create")))
 
         schema = {
             "id": "int64",
@@ -48,7 +48,7 @@ class TestDeltaLakeStorage:
         """Test writing and reading data."""
         import pandas as pd
 
-        storage = DeltaLakeStorage(DeltaLakeConfig(base_path=temp_dir))
+        storage = DeltaLakeStorage(DeltaLakeConfig(base_path=os.path.join(temp_dir, "delta_rw")))
 
         # Create test data
         data = pd.DataFrame({
@@ -70,7 +70,7 @@ class TestDeltaLakeStorage:
         """Test time travel functionality."""
         import pandas as pd
 
-        storage = DeltaLakeStorage(DeltaLakeConfig(base_path=temp_dir))
+        storage = DeltaLakeStorage(DeltaLakeConfig(base_path=os.path.join(temp_dir, "delta_tt")))
 
         # Write initial data
         data1 = pd.DataFrame({"id": [1], "value": [100]})

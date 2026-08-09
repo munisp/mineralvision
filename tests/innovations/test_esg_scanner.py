@@ -1,9 +1,6 @@
 """Deterministic tests for the esg_scanner innovation (B4-14)."""
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from api.innovations.esg_scanner import router
 from api.innovations.esg_scanner.logic import (
     OPS,
@@ -13,6 +10,8 @@ from api.innovations.esg_scanner.logic import (
     load_rulepacks,
     resolve_field,
 )
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 # Fully-compliant project data satisfying every rule in every pack.
 COMPLIANT_PROJECT = {
@@ -98,7 +97,7 @@ class TestCheckOps:
         assert evaluate_check(rule, observed) is expected
 
     def test_missing_field_fails_value_checks_but_passes_missing_op(self):
-        from api.innovations.esg_scanner.logic import Rule, _MISSING
+        from api.innovations.esg_scanner.logic import _MISSING, Rule
         lte = Rule("T", "t", "d", "f", "lte", 3, "minor", "r", "ref")
         missing = Rule("T", "t", "d", "f", "missing", None, "minor", "r", "ref")
         assert evaluate_check(lte, _MISSING) is False

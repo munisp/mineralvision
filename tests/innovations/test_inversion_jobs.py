@@ -2,15 +2,13 @@
 
 import numpy as np
 import pytest
+from api.innovations.inversion_jobs import logic, router
+from api.innovations.inversion_jobs.models import Base, get_session
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from api.innovations.inversion_jobs import router
-from api.innovations.inversion_jobs.models import Base, get_session
-from api.innovations.inversion_jobs import logic
 
 
 @pytest.fixture()
@@ -50,8 +48,14 @@ def _payload(**overrides):
         "parameters": {"max_iterations": 40, "target_misfit": 1e-4},
     }
     # build synthetic observations with the core forward model
-    from api.geophysics.inversion import (InversionMesh, SurveyData,
-        ObservationPoint, Point3D, InversionType, ForwardModeler)
+    from api.geophysics.inversion import (
+        ForwardModeler,
+        InversionMesh,
+        InversionType,
+        ObservationPoint,
+        Point3D,
+        SurveyData,
+    )
     mesh = InversionMesh(origin=Point3D(0, 0, 0), cell_sizes=(10, 10, 10),
                          n_cells=(4, 3, 3))
     true = np.zeros(len(mesh.cells))
@@ -73,7 +77,7 @@ def _payload(**overrides):
     payload["survey"]["observations"] = [
         {"x": o.location.x, "y": o.location.y, "z": o.location.z,
          "value": float(v), "uncertainty": 1.0}
-        for o, v in zip(obs, d)]
+        for o, v in zip(obs, d, strict=False)]
     payload.update(overrides)
     return payload
 

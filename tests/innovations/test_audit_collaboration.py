@@ -1,15 +1,14 @@
 """Deterministic tests for the audit_collaboration innovation (B5-19)."""
 
 import pytest
+from api.innovations.audit_collaboration import router
+from api.innovations.audit_collaboration.db import Base, get_db
+from api.innovations.audit_collaboration.logic import AuditCollaboration, json_diff
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-
-from api.innovations.audit_collaboration import router
-from api.innovations.audit_collaboration.db import Base, get_db
-from api.innovations.audit_collaboration.logic import AuditCollaboration, json_diff
 
 
 @pytest.fixture()

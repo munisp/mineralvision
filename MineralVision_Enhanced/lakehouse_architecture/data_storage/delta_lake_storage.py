@@ -167,7 +167,16 @@ class DeltaLakeStorage:
         fields = []
         for field_def in schema.get("fields", []):
             field_type = field_def.get("type", "string").lower()
-            pa_type = type_mapping.get(field_type, pa.string())
+            pa_type = type_mapping.get(field_type)
+            if pa_type is None:
+                # support parameterized types like array<float> / list<double>
+                import re
+                m = re.fullmatch(r"(?:array|list)<(\w+)>", field_type)
+                if m:
+                    inner = type_mapping.get(m.group(1), pa.string())
+                    pa_type = pa.list_(inner)
+                else:
+                    pa_type = pa.string()
             nullable = field_def.get("nullable", True)
             fields.append(pa.field(field_def["name"], pa_type, nullable=nullable))
         
@@ -263,18 +272,24 @@ class DeltaLakeStorage:
                 "history": [{"version": 0, "timestamp": datetime.now().isoformat(), "operation": "CREATE TABLE"}]
             }
             
-            metadata_path = os.path.join(table_path, "_delta_log")
-            os.makedirs(metadata_path, exist_ok=True)
-            with open(os.path.join(metadata_path, "00000000000000000000.json"), 'w') as f:
-                json.dump(metadata, f, indent=2)
-            
-            self._table_metadata[f"{zone}/{table_name}"] = metadata
-            
+            # NOTE: the platform's own metadata must NOT be written into
+            # _delta_log/ (a hand-written 000...json there is not a valid Delta
+            # commit and corrupts the log for write_deltalake/DeltaTable —
+            # "Kernel error: No table metadata or protocol found"). It lives in
+            # a sidecar file at the table root instead.
             if DELTA_AVAILABLE:
-                empty_df = pd.DataFrame({fd["name"]: pd.Series(dtype=self._get_pandas_dtype(fd["type"])) 
+                empty_df = pd.DataFrame({fd["name"]: pd.Series(dtype=self._get_pandas_dtype(fd["type"]))
                                         for fd in schema.get("fields", [])})
                 empty_table = pa.Table.from_pandas(empty_df, schema=pa_schema)
                 write_deltalake(table_path, empty_table, mode="overwrite", partition_by=partition_by, schema_mode="overwrite")
+            else:
+                os.makedirs(os.path.join(table_path, "_delta_log"), exist_ok=True)
+
+            metadata_path = os.path.join(table_path, "_mineralvision_metadata.json")
+            with open(metadata_path, 'w') as f:
+                json.dump(metadata, f, indent=2)
+
+            self._table_metadata[f"{zone}/{table_name}"] = metadata
             
             self.logger.info(f"Created Delta table at {table_path}")
             return True
@@ -316,6 +331,18 @@ class DeltaLakeStorage:
                 raise ValueError(f"Unsupported data type: {type(data)}")
             
             if DELTA_AVAILABLE:
+                # If the table already exists (e.g. from create_table with a
+                # declared schema like date32), cast the incoming batch to the
+                # existing schema. Otherwise appends of e.g. pandas
+                # datetime64[ns] columns into date32 columns fail with the
+                # misleading CommitFailedError "Table features must be
+                # specified: TimestampWithoutTimezone".
+                if os.path.exists(os.path.join(table_path, "_delta_log")):
+                    # deltalake 1.6.x exposes arro3 schemas; use the dataset
+                    # accessor to get a pyarrow.lib.Schema usable with cast().
+                    existing = DeltaTable(table_path).to_pyarrow_dataset().schema
+                    if existing.names == table.schema.names:
+                        table = table.cast(existing)
                 write_deltalake(table_path, table, mode=mode, partition_by=partition_by)
             else:
                 os.makedirs(table_path, exist_ok=True)
@@ -544,6 +571,10 @@ class DeltaLakeStorage:
                 if key in self._table_metadata:
                     return self._table_metadata[key].get("history", [])
                 
+                sidecar = os.path.join(table_path, "_mineralvision_metadata.json")
+                if os.path.exists(sidecar):
+                    with open(sidecar, 'r') as fp:
+                        return json.load(fp).get("history", [])
                 metadata_path = os.path.join(table_path, "_delta_log")
                 if not os.path.exists(metadata_path):
                     return []
@@ -592,7 +623,7 @@ class DeltaLakeStorage:
                     meta = self._table_metadata[key]
                     return {"schema": meta.get("schema", {}), "metadata": {"partitionColumns": meta.get("partition_by", []), "format": "parquet", "createdAt": meta.get("created_at", "")}}
                 
-                metadata_path = os.path.join(table_path, "_delta_log", "00000000000000000000.json")
+                metadata_path = os.path.join(table_path, "_mineralvision_metadata.json")
                 if os.path.exists(metadata_path):
                     with open(metadata_path, 'r') as f:
                         meta = json.load(f)

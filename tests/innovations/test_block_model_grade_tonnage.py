@@ -1,16 +1,14 @@
 """Deterministic tests for block model builder + grade-tonnage engine."""
 
-import io
 import csv as csvmod
+import io
 
 import numpy as np
 import pytest
+from api.innovations.block_model_grade_tonnage import logic, router
+from api.innovations.resource_monte_carlo.logic import VariogramSpec
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from api.innovations.block_model_grade_tonnage import router
-from api.innovations.block_model_grade_tonnage import logic
-from api.innovations.resource_monte_carlo.logic import VariogramSpec
 
 SPEC = VariogramSpec(model="spherical", nugget=0.05, contribution=0.95,
                      range=60.0)
@@ -149,7 +147,7 @@ def _build_payload():
     coords, values = _samples()
     return {
         "samples": [{"x": c[0], "y": c[1], "z": c[2], "grade": v}
-                    for c, v in zip(coords, values)],
+                    for c, v in zip(coords, values, strict=False)],
         "geometry": {"origin": [0, 0, -5], "block_size": [10, 10, 10],
                      "n_blocks": [9, 9, 1]},
         "variogram": {"model": "spherical", "nugget": 0.05,

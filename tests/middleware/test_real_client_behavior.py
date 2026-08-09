@@ -13,7 +13,6 @@ Proves:
 
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
 
@@ -41,7 +40,7 @@ def clear_fallback_env(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_redis_connect_raises_by_default():
-    from middleware.caching.redis_caching import RedisIntegration, RedisConfig
+    from middleware.caching.redis_caching import RedisConfig, RedisIntegration
 
     redis = RedisIntegration(RedisConfig(host="localhost", port=6399))
     with pytest.raises(RuntimeError, match="MV_ALLOW_MOCK_FALLBACK"):
@@ -58,7 +57,8 @@ def test_apisix_connect_raises_by_default():
 
 def test_kubecost_connect_raises_by_default():
     from middleware.cost_management.kubecost_integration import (
-        KubecostIntegration, KubecostConfig,
+        KubecostConfig,
+        KubecostIntegration,
     )
 
     kc = KubecostIntegration(KubecostConfig(url="http://localhost:19092"))
@@ -68,7 +68,8 @@ def test_kubecost_connect_raises_by_default():
 
 def test_permify_connect_raises_by_default():
     from middleware.authorization.permify_authz import (
-        PermifyAuthorization, PermifyConfig,
+        PermifyAuthorization,
+        PermifyConfig,
     )
 
     pa = PermifyAuthorization(PermifyConfig(host="localhost", port=13476))
@@ -97,7 +98,7 @@ def test_canonical_temporal_connect_raises_by_default():
 # ---------------------------------------------------------------------------
 
 def test_redis_mock_fallback_is_explicit_and_degraded(monkeypatch, caplog):
-    from middleware.caching.redis_caching import RedisIntegration, RedisConfig
+    from middleware.caching.redis_caching import RedisConfig, RedisIntegration
 
     monkeypatch.setenv(ENV_VAR, "true")
     with caplog.at_level(logging.WARNING):
@@ -146,7 +147,7 @@ def test_canonical_temporal_mock_fallback_is_explicit_and_degraded(monkeypatch, 
 
 
 def test_fallback_env_requires_exact_true(monkeypatch):
-    from middleware.caching.redis_caching import RedisIntegration, RedisConfig
+    from middleware.caching.redis_caching import RedisConfig, RedisIntegration
 
     for value in ("1", "yes", "TRUE ", "false"):
         monkeypatch.setenv(ENV_VAR, value)
@@ -178,9 +179,9 @@ def test_temporal_shim_removed_mocks_fail_loudly():
     from middleware.workflow import temporal_workflow as shim
 
     with pytest.raises(AttributeError, match="no silent mocks"):
-        shim.MockTemporalClient
+        _ = shim.MockTemporalClient
     with pytest.raises(AttributeError, match="no silent mocks"):
-        shim.MockWorkflowHandle
+        _ = shim.MockWorkflowHandle
 
 
 def test_temporal_shim_engine_delegates_to_canonical(monkeypatch):

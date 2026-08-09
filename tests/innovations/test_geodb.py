@@ -47,9 +47,6 @@ def _restore_env_after_module():
     yield
     _restore_env()
 
-from fastapi import FastAPI  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-
 from api.database import (  # noqa: E402
     Base,
     DrillholeModel,
@@ -57,8 +54,12 @@ from api.database import (  # noqa: E402
     SampleModel,
     UserModel,
 )
-from api.innovations.geodb import router  # noqa: E402
-from api.innovations.geodb import service  # noqa: E402
+from api.innovations.geodb import (  # noqa: E402
+    router,  # noqa: E402
+    service,  # noqa: E402
+)
+from fastapi import FastAPI  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
 
 app = FastAPI()
 app.include_router(router)

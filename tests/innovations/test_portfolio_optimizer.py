@@ -10,10 +10,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..',
                                 'MineralVision_Final_Package', 'src'))
 
 from api.innovations.portfolio_optimizer.logic import (
-    InconsistentMatrixError, ahp_weights, weighted_scores,
-    non_dominated_sort, pareto_frontier, budget_select,
+    InconsistentMatrixError,
+    ahp_weights,
+    budget_select,
+    non_dominated_sort,
+    pareto_frontier,
+    weighted_scores,
 )
-
 
 # ---------------------------------------------------------------------------
 # AHP
@@ -21,8 +24,8 @@ from api.innovations.portfolio_optimizer.logic import (
 
 def test_ahp_perfectly_consistent_matrix():
     # w = (4/7, 2/7, 1/7) generates exactly this reciprocal matrix
-    A = [[1, 2, 4], [0.5, 1, 2], [0.25, 0.5, 1]]
-    res = ahp_weights(A)
+    mat = [[1, 2, 4], [0.5, 1, 2], [0.25, 0.5, 1]]
+    res = ahp_weights(mat)
     assert res["consistent"] is True
     assert res["cr"] == pytest.approx(0.0, abs=1e-9)
     assert res["lambda_max"] == pytest.approx(3.0, abs=1e-9)
@@ -31,18 +34,18 @@ def test_ahp_perfectly_consistent_matrix():
 
 def test_ahp_slightly_inconsistent_accepted():
     # classic Saaty example with small inconsistency
-    A = [[1, 5, 3], [1 / 5, 1, 1 / 3], [1 / 3, 3, 1]]
-    res = ahp_weights(A)
+    mat = [[1, 5, 3], [1 / 5, 1, 1 / 3], [1 / 3, 3, 1]]
+    res = ahp_weights(mat)
     assert res["consistent"] is True
     assert 0.0 < res["cr"] < 0.1
     assert res["weights"].sum() == pytest.approx(1.0)
 
 
 def test_ahp_inconsistent_matrix_rejected():
-    # cyclic comparisons: A>B, B>C, C>A — CR ~ 0.43
-    A = [[1, 2, 0.5], [0.5, 1, 2], [2, 0.5, 1]]
+    # cyclic comparisons: mat>B, B>C, C>mat — CR ~ 0.43
+    mat = [[1, 2, 0.5], [0.5, 1, 2], [2, 0.5, 1]]
     with pytest.raises(InconsistentMatrixError):
-        ahp_weights(A)
+        ahp_weights(mat)
 
 
 def test_ahp_rejects_non_reciprocal():
@@ -51,17 +54,16 @@ def test_ahp_rejects_non_reciprocal():
 
 
 def test_ahp_weights_sum_to_one_5x5():
-    rng = np.random.default_rng(0)
     w_true = np.array([0.4, 0.2, 0.15, 0.15, 0.1])
-    A = w_true[:, None] / w_true[None, :]
-    res = ahp_weights(A)
+    mat = w_true[:, None] / w_true[None, :]
+    res = ahp_weights(mat)
     assert res["weights"] == pytest.approx(w_true, abs=1e-6)
 
 
 def test_weighted_scores():
-    S = [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]
+    score_mat = [[1.0, 0.0], [0.0, 1.0], [0.5, 0.5]]
     w = [0.75, 0.25]
-    out = weighted_scores(S, w)
+    out = weighted_scores(score_mat, w)
     assert out == pytest.approx([0.75, 0.25, 0.5])
 
 
@@ -161,9 +163,9 @@ def test_budget_select_exact_knapsack_case():
 # ---------------------------------------------------------------------------
 
 def _client():
+    from api.innovations.portfolio_optimizer import router
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from api.innovations.portfolio_optimizer import router
     app = FastAPI()
     app.include_router(router)
     return TestClient(app)

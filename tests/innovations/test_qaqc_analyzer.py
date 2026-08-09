@@ -3,11 +3,9 @@
 import math
 
 import pytest
+from api.innovations.qaqc_analyzer import logic, router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from api.innovations.qaqc_analyzer import router
-from api.innovations.qaqc_analyzer import logic
 
 CRM = {"OREAS-1": {"mean": 2.00, "sd": 0.05}}
 

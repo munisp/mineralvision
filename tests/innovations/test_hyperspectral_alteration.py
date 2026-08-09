@@ -2,11 +2,9 @@
 
 import numpy as np
 import pytest
+from api.innovations.hyperspectral_alteration import logic, router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from api.innovations.hyperspectral_alteration import router
-from api.innovations.hyperspectral_alteration import logic
 
 
 def _cube(seed=3, shape=(9, 20, 20)):
@@ -59,7 +57,8 @@ def test_ndvi_mask_excludes_vegetated_zone():
 
 def test_iron_oxide_and_carbonate_indices():
     cube = _cube()
-    cube[3] = 1.0; cube[1] = 1.0
+    cube[3] = 1.0
+    cube[1] = 1.0
     cube[3, 0:3, 0:3] = 2.0          # iron: b4/b2 = 2 in corner
     iron = logic.map_alteration_zones(
         cube, "iron_oxide", preset="aster", threshold=1.6,
@@ -85,7 +84,8 @@ def test_min_pixels_and_presets():
     assert res["n_zones"] == 0
     # landsat8 preset: clay = b7/b6.
     cube8 = np.ones((7, 5, 5))
-    cube8[6] = 2.0; cube8[5] = 1.0
+    cube8[6] = 2.0
+    cube8[5] = 1.0
     clay = logic.compute_index(cube8, "clay", logic.BAND_PRESETS["landsat8"])
     assert np.allclose(clay, 2.0)
     with pytest.raises(ValueError, match="not available"):

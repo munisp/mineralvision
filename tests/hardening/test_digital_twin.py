@@ -14,7 +14,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "MineralVision_Final_Package"))
 
 from src.api.digital_twin.plant_simulation import (  # noqa: E402
-    PlantTwin, TelemetryStream, TelemetryPoint, create_plant_twin,
+    PlantTwin,
+    TelemetryPoint,
+    TelemetryStream,
+    create_plant_twin,
 )
 
 
