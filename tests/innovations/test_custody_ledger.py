@@ -95,7 +95,7 @@ class TestAppendAndChain:
 
     def test_invalid_event_and_entity_types_rejected(self, ledger):
         with pytest.raises(ValueError):
-            ledger.append("B1", "crop_monitoring", "batch_created", "geo", {})
+            ledger.append("B1", "assay_batch", "batch_created", "geo", {})
         with pytest.raises(ValueError):
             ledger.append("B1", "sample_batch", "planted", "geo", {})
         with pytest.raises(ValueError):

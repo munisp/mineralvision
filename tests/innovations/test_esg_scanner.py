@@ -107,7 +107,7 @@ class TestCheckOps:
     def test_resolve_dotted_path(self):
         data = {"a": {"b": {"c": 42}}}
         assert resolve_field(data, "a.b.c") == 42
-        assert resolve_field(data, "a.b.zzz") is not 42
+        assert resolve_field(data, "a.b.zzz") != 42
 
 
 class TestScanner:
