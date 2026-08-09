@@ -48,3 +48,12 @@ All under `innovations/geotoolkit/` (single module, sub-routers fine, prefix `/i
 - Wire pages: replace mock map/3D sections of DrillholesPage/Visualization3DPage or add `/map-explorer` route in App.tsx.
 - No fabricated data: all layers from API; show honest error state when API unreachable.
 - Cannot npm-install in sandbox — code must be type-consistent; verify with `tsc --noEmit` if toolchain available, else careful manual review.
+
+---
+## STATUS (2026-08-09) — IMPLEMENTED & MERGED
+- Module A geoai: `/innovations/geoai` — 7 endpoints, 17 tests
+- Module B geodb: `/innovations/geodb` — 9 endpoints, 10 tests; postgis/postgis:16-3.4 in compose
+- Innovations 1–5 geotoolkit: `/innovations/geotoolkit` — 13 tests
+- Innovations 6–10 geotoolkit_ext: `/innovations/geotoolkit-ext` — 13 tests
+- Frontend: MapLibre ExplorationMap + Cesium DrillholeScene3D, /map-explorer, docs/GEOSPATIAL_FRONTEND.md
+- Total API routes: 324. Full suite: 461 passed / 3 skipped.
