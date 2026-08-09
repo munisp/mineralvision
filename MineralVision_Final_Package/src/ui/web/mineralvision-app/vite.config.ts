@@ -144,6 +144,11 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true
+      },
+      // Geotoolkit/innovation routers are mounted at the server root.
+      '/innovations': {
+        target: 'http://localhost:8000',
+        changeOrigin: true
       }
     }
   }

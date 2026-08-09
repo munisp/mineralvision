@@ -6,6 +6,7 @@ import api from '../../services/api';
 import { useAuthStore } from '../../store/authStore';
 import {
   GeoToolkitLayer,
+  featureTileProbeUrl,
   featureTileUrl,
   heatmapTileUrl,
   resolveBaseUrl,
@@ -183,12 +184,10 @@ export default function ExplorationMap({
       try {
         // Probe the first tile of each enabled layer via the axios client so
         // backend/auth failures produce an explicit error state up front.
-        const base = resolveBaseUrl(apiBaseUrl);
         const probes = ALL_LAYERS.map((layer) =>
-          api.get(
-            `${base}/api/innovations/geotoolkit/tiles/features/0/0/0?layer=${layer}`,
-            { validateStatus: (s) => s < 500 },
-          ),
+          api.get(featureTileProbeUrl(layer, apiBaseUrl), {
+            validateStatus: (s) => s < 500,
+          }),
         );
         const results = await Promise.allSettled(probes);
         const failed = results.find(
