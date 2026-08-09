@@ -11,27 +11,54 @@ import json
 import datetime
 from pydantic import BaseModel, Field
 
-from ..digital_twin.core import (
-    DigitalTwinManager, 
-    DigitalTwinEntity, 
-    SpatialEntity,
-    MineralDeposit,
-    ExplorationArea,
-    Equipment,
-    DigitalTwinSimulation,
-    ExtractionSimulation,
-    EnvironmentalImpactSimulation
-)
+# Heavy geospatial dependencies (geopandas, shapely) are optional. The API
+# boots without them; these endpoints degrade with HTTP 503.
+try:
+    from ..digital_twin.core import (
+        DigitalTwinManager,
+        DigitalTwinEntity,
+        SpatialEntity,
+        MineralDeposit,
+        ExplorationArea,
+        Equipment,
+        DigitalTwinSimulation,
+        ExtractionSimulation,
+        EnvironmentalImpactSimulation
+    )
+    DIGITAL_TWIN_AVAILABLE = True
+    _DIGITAL_TWIN_ERROR: Optional[str] = None
+except ImportError as exc:  # pragma: no cover - depends on optional deps
+    DigitalTwinManager = DigitalTwinEntity = SpatialEntity = None
+    MineralDeposit = ExplorationArea = Equipment = None
+    DigitalTwinSimulation = ExtractionSimulation = None
+    EnvironmentalImpactSimulation = None
+    DIGITAL_TWIN_AVAILABLE = False
+    _DIGITAL_TWIN_ERROR = str(exc)
+
+
+def _require_digital_twin():
+    """Raise HTTP 503 when the geospatial stack is not installed."""
+    if not DIGITAL_TWIN_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Digital twin is unavailable: optional geospatial dependencies "
+                f"are not installed ({_DIGITAL_TWIN_ERROR}). Install the "
+                "optional geospatial requirements to enable this feature."
+            )
+        )
+
 
 # Initialize router
 router = APIRouter(
     prefix="/digital-twin",
     tags=["digital-twin"],
     responses={404: {"description": "Not found"}},
+    dependencies=[Depends(_require_digital_twin)],
 )
 
 # Initialize digital twin manager
-digital_twin_manager = DigitalTwinManager()
+digital_twin_manager = DigitalTwinManager() if DIGITAL_TWIN_AVAILABLE else None
 
 # Pydantic models for request/response validation
 class EntityBase(BaseModel):

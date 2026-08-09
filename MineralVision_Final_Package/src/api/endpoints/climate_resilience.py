@@ -4,21 +4,46 @@ import logging
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, BackgroundTasks
 from typing import Dict, List, Any, Optional
 from pydantic import BaseModel
-from ..climate_resilience.climate_resilience_analysis import ClimateResilienceAnalysis
+# Heavy geospatial dependencies (xarray, rasterio, geopandas) are optional.
+# The API boots without them; these endpoints degrade with HTTP 503.
+try:
+    from ..climate_resilience.climate_resilience_analysis import ClimateResilienceAnalysis
+    CLIMATE_RESILIENCE_AVAILABLE = True
+    _CLIMATE_RESILIENCE_ERROR: Optional[str] = None
+except ImportError as exc:  # pragma: no cover - depends on optional deps
+    ClimateResilienceAnalysis = None
+    CLIMATE_RESILIENCE_AVAILABLE = False
+    _CLIMATE_RESILIENCE_ERROR = str(exc)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def _require_climate_resilience():
+    """Raise HTTP 503 when the geospatial stack is not installed."""
+    if not CLIMATE_RESILIENCE_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Climate resilience analysis is unavailable: optional "
+                "geospatial dependencies are not installed "
+                f"({_CLIMATE_RESILIENCE_ERROR}). Install the optional "
+                "geospatial requirements to enable this feature."
+            )
+        )
+
 
 # Create router
 router = APIRouter(
     prefix="/climate-resilience",
     tags=["climate-resilience"],
     responses={404: {"description": "Not found"}},
+    dependencies=[Depends(_require_climate_resilience)],
 )
 
 # Initialize climate resilience analysis system
-climate_resilience = ClimateResilienceAnalysis()
+climate_resilience = ClimateResilienceAnalysis() if CLIMATE_RESILIENCE_AVAILABLE else None
 
 # Models for request/response
 class Region(BaseModel):

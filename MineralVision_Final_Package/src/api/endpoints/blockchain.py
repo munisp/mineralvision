@@ -14,17 +14,41 @@ import datetime
 import uuid
 from pydantic import BaseModel
 
-from ..blockchain.blockchain_data_provenance import BlockchainDataProvenance
+# Blockchain backend dependencies (web3, ipfshttpclient, eth_account) are
+# optional. The API boots without them; these endpoints degrade with HTTP 503.
+try:
+    from ..blockchain.blockchain_data_provenance import BlockchainDataProvenance
+    BLOCKCHAIN_AVAILABLE = True
+    _BLOCKCHAIN_ERROR: Optional[str] = None
+except ImportError as exc:  # pragma: no cover - depends on optional deps
+    BlockchainDataProvenance = None
+    BLOCKCHAIN_AVAILABLE = False
+    _BLOCKCHAIN_ERROR = str(exc)
+
+
+def _require_blockchain():
+    """Raise HTTP 503 when the blockchain backend is not installed."""
+    if not BLOCKCHAIN_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Blockchain provenance is unavailable: optional blockchain "
+                f"dependencies are not installed ({_BLOCKCHAIN_ERROR}). "
+                "Install the optional blockchain requirements to enable this feature."
+            )
+        )
+
 
 # Create router
 router = APIRouter(
     prefix="/api/blockchain",
     tags=["blockchain"],
     responses={404: {"description": "Not found"}},
+    dependencies=[Depends(_require_blockchain)],
 )
 
 # Initialize blockchain data provenance service
-blockchain_service = BlockchainDataProvenance()
+blockchain_service = BlockchainDataProvenance() if BLOCKCHAIN_AVAILABLE else None
 
 # Pydantic models for request/response validation
 class DataRegistrationRequest(BaseModel):

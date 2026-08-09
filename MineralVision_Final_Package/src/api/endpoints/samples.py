@@ -1,7 +1,7 @@
 """
 API endpoints for Sample management.
 
-This module provides CRUD operations for geological samples.
+Database-backed CRUD operations for geological samples.
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -10,10 +10,11 @@ from pydantic import BaseModel, Field
 from datetime import datetime
 import uuid
 
-router = APIRouter()
+from sqlalchemy.orm import Session
 
-# Runtime storage for API operations
-samples_db: Dict[str, dict] = {}
+from ..database import get_db, SampleModel, DrillholeModel
+
+router = APIRouter()
 
 
 class SampleCreate(BaseModel):
@@ -50,113 +51,150 @@ class Sample(BaseModel):
     updatedAt: str
 
 
+def _to_response(s: SampleModel) -> Sample:
+    return Sample(
+        id=s.id,
+        sampleId=s.sample_id,
+        drillholeId=s.drillhole_id,
+        fromDepth=s.from_depth,
+        toDepth=s.to_depth,
+        sampleType=s.sample_type,
+        assays=s.assay_data or {},
+        createdAt=s.created_at.isoformat(),
+        updatedAt=s.created_at.isoformat()
+    )
+
+
 @router.get("", response_model=List[Sample])
 async def list_samples(
     drillholeId: Optional[str] = Query(None, description="Filter by drillhole ID"),
     sampleType: Optional[str] = Query(None, description="Filter by sample type"),
     limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db)
 ):
     """List all samples with optional filtering."""
-    samples = list(samples_db.values())
-    
-    # Apply filters
+    query = db.query(SampleModel)
     if drillholeId:
-        samples = [s for s in samples if s.get("drillholeId") == drillholeId]
+        query = query.filter(SampleModel.drillhole_id == drillholeId)
     if sampleType:
-        samples = [s for s in samples if s.get("sampleType") == sampleType]
-    
-    # Apply pagination
-    samples = samples[offset:offset + limit]
-    
-    return [Sample(**s) for s in samples]
+        query = query.filter(SampleModel.sample_type == sampleType)
+    samples = query.offset(offset).limit(limit).all()
+    return [_to_response(s) for s in samples]
 
 
 @router.get("/{sample_id}", response_model=Sample)
-async def get_sample(sample_id: str):
+async def get_sample(sample_id: str, db: Session = Depends(get_db)):
     """Get a specific sample by ID."""
-    if sample_id not in samples_db:
+    sample = db.query(SampleModel).filter(SampleModel.id == sample_id).first()
+    if not sample:
         raise HTTPException(status_code=404, detail=f"Sample {sample_id} not found")
-    return Sample(**samples_db[sample_id])
+    return _to_response(sample)
 
 
 @router.post("", response_model=Sample, status_code=201)
-async def create_sample(sample: SampleCreate):
+async def create_sample(sample: SampleCreate, db: Session = Depends(get_db)):
     """Create a new sample."""
     # Validate depth range
     if sample.toDepth <= sample.fromDepth:
         raise HTTPException(status_code=400, detail="toDepth must be greater than fromDepth")
-    
-    sample_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
-    
-    sample_data = {
-        "id": sample_id,
-        "sampleId": sample.sampleId,
-        "drillholeId": sample.drillholeId,
-        "fromDepth": sample.fromDepth,
-        "toDepth": sample.toDepth,
-        "sampleType": sample.sampleType,
-        "assays": sample.assays or {},
-        "createdAt": now,
-        "updatedAt": now
-    }
-    
-    samples_db[sample_id] = sample_data
-    return Sample(**sample_data)
+
+    # Verify drillhole exists
+    drillhole = db.query(DrillholeModel).filter(
+        DrillholeModel.id == sample.drillholeId
+    ).first()
+    if not drillhole:
+        raise HTTPException(status_code=404, detail=f"Drillhole {sample.drillholeId} not found")
+
+    db_sample = SampleModel(
+        id=str(uuid.uuid4()),
+        sample_id=sample.sampleId,
+        drillhole_id=sample.drillholeId,
+        from_depth=sample.fromDepth,
+        to_depth=sample.toDepth,
+        sample_type=sample.sampleType,
+        lithology=(sample.metadata or {}).get("lithology"),
+        assay_data=sample.assays or {}
+    )
+    db.add(db_sample)
+
+    # Update drillhole assay count
+    drillhole.assay_count = (drillhole.assay_count or 0) + len(sample.assays or {})
+
+    db.commit()
+    db.refresh(db_sample)
+    return _to_response(db_sample)
 
 
 @router.put("/{sample_id}", response_model=Sample)
-async def update_sample(sample_id: str, sample: SampleUpdate):
+async def update_sample(sample_id: str, sample: SampleUpdate, db: Session = Depends(get_db)):
     """Update an existing sample."""
-    if sample_id not in samples_db:
+    db_sample = db.query(SampleModel).filter(SampleModel.id == sample_id).first()
+    if not db_sample:
         raise HTTPException(status_code=404, detail=f"Sample {sample_id} not found")
-    
-    existing = samples_db[sample_id]
+
     update_data = sample.model_dump(exclude_unset=True)
-    
-    for key, value in update_data.items():
-        if value is not None:
-            existing[key] = value
-    
-    # Validate depth range if updated
-    if existing["toDepth"] <= existing["fromDepth"]:
+    if update_data.get("sampleId"):
+        db_sample.sample_id = update_data["sampleId"]
+    if update_data.get("fromDepth") is not None:
+        db_sample.from_depth = update_data["fromDepth"]
+    if update_data.get("toDepth") is not None:
+        db_sample.to_depth = update_data["toDepth"]
+    if update_data.get("sampleType"):
+        db_sample.sample_type = update_data["sampleType"]
+    if update_data.get("assays") is not None:
+        db_sample.assay_data = update_data["assays"]
+
+    if db_sample.to_depth <= db_sample.from_depth:
         raise HTTPException(status_code=400, detail="toDepth must be greater than fromDepth")
-    
-    existing["updatedAt"] = datetime.utcnow().isoformat()
-    samples_db[sample_id] = existing
-    
-    return Sample(**existing)
+
+    db.commit()
+    db.refresh(db_sample)
+    return _to_response(db_sample)
 
 
 @router.delete("/{sample_id}", status_code=204)
-async def delete_sample(sample_id: str):
+async def delete_sample(sample_id: str, db: Session = Depends(get_db)):
     """Delete a sample."""
-    if sample_id not in samples_db:
+    db_sample = db.query(SampleModel).filter(SampleModel.id == sample_id).first()
+    if not db_sample:
         raise HTTPException(status_code=404, detail=f"Sample {sample_id} not found")
-    
-    del samples_db[sample_id]
+
+    db.delete(db_sample)
+    db.commit()
     return None
 
 
 @router.post("/{sample_id}/assays")
-async def add_assays(sample_id: str, assays: Dict[str, float]):
+async def add_assays(
+    sample_id: str,
+    assays: Dict[str, float],
+    db: Session = Depends(get_db)
+):
     """Add or update assay results for a sample."""
-    if sample_id not in samples_db:
+    db_sample = db.query(SampleModel).filter(SampleModel.id == sample_id).first()
+    if not db_sample:
         raise HTTPException(status_code=404, detail=f"Sample {sample_id} not found")
-    
-    existing = samples_db[sample_id]
-    existing_assays = existing.get("assays", {})
-    existing_assays.update(assays)
-    existing["assays"] = existing_assays
-    existing["updatedAt"] = datetime.utcnow().isoformat()
-    
-    samples_db[sample_id] = existing
-    return Sample(**existing)
+
+    merged = dict(db_sample.assay_data or {})
+    merged.update(assays)
+    db_sample.assay_data = merged
+
+    drillhole = db.query(DrillholeModel).filter(
+        DrillholeModel.id == db_sample.drillhole_id
+    ).first()
+    if drillhole:
+        drillhole.assay_count = (drillhole.assay_count or 0) + len(assays)
+
+    db.commit()
+    db.refresh(db_sample)
+    return _to_response(db_sample)
 
 
 @router.get("/by-drillhole/{drillhole_id}", response_model=List[Sample])
-async def get_samples_by_drillhole(drillhole_id: str):
-    """Get all samples for a specific drillhole."""
-    samples = [s for s in samples_db.values() if s.get("drillholeId") == drillhole_id]
-    return [Sample(**s) for s in samples]
+async def get_samples_by_drillhole(drillhole_id: str, db: Session = Depends(get_db)):
+    """Get all samples for a drillhole."""
+    samples = db.query(SampleModel).filter(
+        SampleModel.drillhole_id == drillhole_id
+    ).all()
+    return [_to_response(s) for s in samples]

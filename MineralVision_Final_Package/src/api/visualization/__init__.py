@@ -40,7 +40,6 @@ from .collaborative_3d import (
     AnnotationType,
     ReviewStatus,
     ExportFormat,
-    User as CollabUser,
     Annotation,
     Measurement,
     SceneView,
@@ -56,7 +55,6 @@ from .collaborative_3d import (
 )
 
 __all__ = [
-    # 3D Visualization
     "RenderMode",
     "ColorMap",
     "CameraView",
@@ -78,13 +76,10 @@ __all__ = [
     "PyVistaRenderer",
     "VisualizationWorkflow",
     "create_visualization_workflow",
-    
-    # Collaborative 3D
     "UserRole",
     "AnnotationType",
     "ReviewStatus",
     "ExportFormat",
-    "CollabUser",
     "Annotation",
     "Measurement",
     "SceneView",

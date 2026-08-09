@@ -310,27 +310,32 @@ class Tenant:
 
 
 class PasswordHasher:
-    """Password hashing utility."""
-    
+    """Password hashing utility (bcrypt, work factor 12)."""
+
+    BCRYPT_WORK_FACTOR = 12
+
     @staticmethod
     def hash_password(password: str, salt: Optional[str] = None) -> str:
-        """Hash a password."""
-        if salt is None:
-            salt = secrets.token_hex(16)
-        
-        hash_input = f"{salt}:{password}".encode('utf-8')
-        password_hash = hashlib.sha256(hash_input).hexdigest()
-        
-        return f"{salt}:{password_hash}"
-    
+        """Hash a password with bcrypt.
+
+        The `salt` parameter is accepted for backwards compatibility and
+        ignored: bcrypt generates and embeds its own salt.
+        """
+        import bcrypt
+        return bcrypt.hashpw(
+            password.encode('utf-8'),
+            bcrypt.gensalt(rounds=PasswordHasher.BCRYPT_WORK_FACTOR)
+        ).decode('utf-8')
+
     @staticmethod
     def verify_password(password: str, stored_hash: str) -> bool:
-        """Verify a password against stored hash."""
+        """Verify a password against a stored bcrypt hash."""
+        import bcrypt
         try:
-            salt, _ = stored_hash.split(':')
-            computed_hash = PasswordHasher.hash_password(password, salt)
-            return secrets.compare_digest(computed_hash, stored_hash)
-        except ValueError:
+            return bcrypt.checkpw(
+                password.encode('utf-8'), stored_hash.encode('utf-8')
+            )
+        except (ValueError, TypeError):
             return False
 
 
@@ -1171,3 +1176,59 @@ class RBACSystem:
 def create_rbac_system() -> RBACSystem:
     """Factory function to create RBAC system."""
     return RBACSystem()
+
+
+class RBACManager:
+    """
+    Facade over RBACSystem exposing the user/role management surface
+    consumed by the API layer.
+
+    Provides create_user() (with caller-supplied IDs), update_user_roles()
+    and get_user_permissions() on top of UserManager/RoleManager, returning
+    plain serializable structures.
+    """
+
+    def __init__(self):
+        self._system = create_rbac_system()
+
+    @property
+    def system(self) -> RBACSystem:
+        return self._system
+
+    def create_user(self, user_id: str, email: str, name: str,
+                    roles: Optional[List[str]] = None,
+                    password: Optional[str] = None) -> Dict[str, Any]:
+        """Create a user with a caller-supplied ID."""
+        user = self._system.user_manager.create_user(
+            username=email,
+            email=email,
+            password=password or secrets.token_urlsafe(16),
+            first_name=name.split(" ", 1)[0] if name else "",
+            last_name=name.split(" ", 1)[1] if name and " " in name else "",
+            roles=roles or ["viewer"]
+        )
+        # Re-key to the caller-supplied ID so API storage and RBAC stay in sync
+        if user.id != user_id:
+            del self._system.user_manager.users[user.id]
+            user.id = user_id
+            self._system.user_manager.users[user_id] = user
+        return user.to_dict()
+
+    def update_user_roles(self, user_id: str, roles: List[str]) -> bool:
+        """Replace a user's role list."""
+        user = self._system.user_manager.update_user(user_id, roles=roles)
+        return user is not None
+
+    def get_user_permissions(self, user_id: str) -> List[str]:
+        """Get all permission names for a user as strings."""
+        permissions = self._system.user_manager.get_user_permissions(user_id)
+        return sorted({
+            f"{p.resource_type.value}:{action.value}"
+            for p in permissions
+            for action in p.actions
+        })
+
+
+def create_rbac_manager() -> RBACManager:
+    """Factory function to create an RBACManager facade."""
+    return RBACManager()

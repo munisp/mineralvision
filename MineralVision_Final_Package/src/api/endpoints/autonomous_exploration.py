@@ -4,22 +4,48 @@ from pydantic import BaseModel
 from datetime import datetime
 import json
 
-from ..autonomous_exploration.core import (
-    AutonomousExplorationSystem,
-    DroneSpecification,
-    DroneState,
-    SamplingPoint,
-    MissionPlan,
-    ExplorationArea
-)
+# Heavy geospatial dependencies (shapely) are optional. The API boots
+# without them; these endpoints degrade with HTTP 503.
+try:
+    from ..autonomous_exploration.core import (
+        AutonomousExplorationSystem,
+        DroneSpecification,
+        DroneState,
+        SamplingPoint,
+        MissionPlan,
+        ExplorationArea
+    )
+    AUTONOMOUS_EXPLORATION_AVAILABLE = True
+    _AUTONOMOUS_EXPLORATION_ERROR: Optional[str] = None
+except ImportError as exc:  # pragma: no cover - depends on optional deps
+    AutonomousExplorationSystem = DroneSpecification = DroneState = None
+    SamplingPoint = MissionPlan = ExplorationArea = None
+    AUTONOMOUS_EXPLORATION_AVAILABLE = False
+    _AUTONOMOUS_EXPLORATION_ERROR = str(exc)
+
+
+def _require_autonomous_exploration():
+    """Raise HTTP 503 when the geospatial stack is not installed."""
+    if not AUTONOMOUS_EXPLORATION_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Autonomous exploration is unavailable: optional geospatial "
+                "dependencies are not installed "
+                f"({_AUTONOMOUS_EXPLORATION_ERROR}). Install the optional "
+                "geospatial requirements to enable this feature."
+            )
+        )
+
 
 # Initialize the autonomous exploration system
-autonomous_system = AutonomousExplorationSystem()
+autonomous_system = AutonomousExplorationSystem() if AUTONOMOUS_EXPLORATION_AVAILABLE else None
 
 router = APIRouter(
     prefix="/autonomous-exploration",
     tags=["autonomous-exploration"],
     responses={404: {"description": "Not found"}},
+    dependencies=[Depends(_require_autonomous_exploration)],
 )
 
 # Request and response models

@@ -12,18 +12,30 @@ import os
 import uuid
 import json
 import numpy as np
-import xarray as xr
 import pandas as pd
 from datetime import datetime
 import tempfile
 import shutil
 from pydantic import BaseModel, Field
 
-from ..sensor_fusion.core import SensorData, SensorType, DataDimension
-from ..sensor_fusion.hyperspectral_adapter import HyperspectralDataAdapter
-from ..sensor_fusion.lidar_adapter import LidarDataAdapter
-from ..sensor_fusion.magnetometry_adapter import MagnetometryDataAdapter
-from ..sensor_fusion.fusion_algorithms import WeightedAverageFusion, BayesianFusion
+# Heavy geospatial dependencies (xarray, rasterio, pyproj) are optional.
+# The API boots without them; sensor-fusion endpoints degrade with HTTP 503.
+try:
+    import xarray as xr
+    from ..sensor_fusion.core import SensorData, SensorType, DataDimension
+    from ..sensor_fusion.hyperspectral_adapter import HyperspectralDataAdapter
+    from ..sensor_fusion.lidar_adapter import LidarDataAdapter
+    from ..sensor_fusion.magnetometry_adapter import MagnetometryDataAdapter
+    from ..sensor_fusion.fusion_algorithms import WeightedAverageFusion, BayesianFusion
+    SENSOR_FUSION_AVAILABLE = True
+    _SENSOR_FUSION_ERROR: Optional[str] = None
+except ImportError as exc:  # pragma: no cover - depends on optional deps
+    xr = None
+    SensorData = SensorType = DataDimension = None
+    HyperspectralDataAdapter = LidarDataAdapter = MagnetometryDataAdapter = None
+    WeightedAverageFusion = BayesianFusion = None
+    SENSOR_FUSION_AVAILABLE = False
+    _SENSOR_FUSION_ERROR = str(exc)
 
 # Create router
 router = APIRouter(
@@ -32,14 +44,27 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 
-# Initialize adapters
-hyperspectral_adapter = HyperspectralDataAdapter()
-lidar_adapter = LidarDataAdapter()
-magnetometry_adapter = MagnetometryDataAdapter()
+# Initialize adapters (None when heavy geospatial deps are not installed)
+hyperspectral_adapter = HyperspectralDataAdapter() if SENSOR_FUSION_AVAILABLE else None
+lidar_adapter = LidarDataAdapter() if SENSOR_FUSION_AVAILABLE else None
+magnetometry_adapter = MagnetometryDataAdapter() if SENSOR_FUSION_AVAILABLE else None
 
 # Initialize fusion algorithms
-weighted_fusion = WeightedAverageFusion()
-bayesian_fusion = BayesianFusion()
+weighted_fusion = WeightedAverageFusion() if SENSOR_FUSION_AVAILABLE else None
+bayesian_fusion = BayesianFusion() if SENSOR_FUSION_AVAILABLE else None
+
+
+def _require_sensor_fusion():
+    """Raise HTTP 503 when the sensor-fusion stack is not installed."""
+    if not SENSOR_FUSION_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Sensor fusion is unavailable: optional geospatial dependencies "
+                f"are not installed ({_SENSOR_FUSION_ERROR}). "
+                "Install the optional geospatial requirements to enable this feature."
+            )
+        )
 
 # Runtime storage for API operations
 # In a production environment, this would be replaced with a database
@@ -77,7 +102,8 @@ async def upload_sensor_data(
     sensor_type: str = Path(..., description="Type of sensor data (hyperspectral, lidar, magnetometry, etc.)"),
     file: UploadFile = File(...),
     metadata: str = Form(None),
-    coordinate_system: str = Form(None)
+    coordinate_system: str = Form(None),
+    _: None = Depends(_require_sensor_fusion)
 ):
     """
     Upload sensor data file.
@@ -206,7 +232,8 @@ async def get_sensor_data_info(data_id: str):
 @router.post("/preprocess/{data_id}", response_model=SensorDataInfo)
 async def preprocess_sensor_data(
     data_id: str,
-    parameters: Dict[str, Any]
+    parameters: Dict[str, Any],
+    _: None = Depends(_require_sensor_fusion)
 ):
     """
     Preprocess sensor data.
@@ -259,7 +286,10 @@ async def preprocess_sensor_data(
     return response
 
 @router.post("/fuse", response_model=FusionResult)
-async def fuse_sensor_data(fusion_request: FusionRequest):
+async def fuse_sensor_data(
+    fusion_request: FusionRequest,
+    _: None = Depends(_require_sensor_fusion)
+):
     """
     Fuse multiple sensor data.
     
@@ -358,7 +388,8 @@ async def get_fusion_result_info(result_id: str):
 @router.get("/export/{data_id}")
 async def export_data(
     data_id: str,
-    format: str = Query("geotiff", description="Export format (geotiff, csv, json)")
+    format: str = Query("geotiff", description="Export format (geotiff, csv, json)"),
+    _: None = Depends(_require_sensor_fusion)
 ):
     """
     Export sensor data or fusion result.

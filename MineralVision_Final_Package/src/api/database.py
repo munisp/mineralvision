@@ -5,6 +5,7 @@ Provides persistent storage for all platform entities.
 """
 
 import os
+import logging
 from datetime import datetime
 from typing import Optional, List
 from contextlib import contextmanager
@@ -14,7 +15,19 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, Session
 
 # Database configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./mineralvision.db")
+# Production: set DATABASE_URL to a Postgres DSN, e.g.
+#   postgresql+psycopg2://user:pass@host:5432/mineralvision
+# SQLite is only a development fallback when DATABASE_URL is unset.
+logger = logging.getLogger(__name__)
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    DATABASE_URL = "sqlite:///./mineralvision.db"
+    logger.warning(
+        "DATABASE_URL is not set — falling back to local SQLite "
+        "(mineralvision.db). This is a DEVELOPMENT fallback only; configure a "
+        "Postgres DSN via DATABASE_URL for production."
+    )
 
 engine = create_engine(
     DATABASE_URL,
@@ -170,23 +183,35 @@ def get_db_context():
 
 
 # Seed demo data
-def seed_demo_data():
-    """Seed the database with demo data."""
+def seed_demo_data(admin_password: Optional[str] = None):
+    """
+    Seed the database with demo data.
+
+    Only invoked when SEED_DEMO=true. The admin password MUST be supplied
+    (from the ADMIN_INITIAL_PASSWORD env var); it is hashed with bcrypt.
+    There are no hardcoded credentials.
+    """
     import uuid
-    import hashlib
-    
+    from src.api.auth_middleware import hash_password
+
+    if not admin_password:
+        raise RuntimeError(
+            "ADMIN_INITIAL_PASSWORD is required when seeding demo data "
+            "(SEED_DEMO=true). Refusing to seed with a default password."
+        )
+
     with get_db_context() as db:
         # Check if data already exists
         if db.query(UserModel).first():
             return
-        
+
         # Create admin user
         admin_id = str(uuid.uuid4())
         admin = UserModel(
             id=admin_id,
             username="admin",
             email="admin@mineralvision.com",
-            password_hash=hashlib.sha256("admin123".encode()).hexdigest(),
+            password_hash=hash_password(admin_password),
             first_name="Admin",
             last_name="User",
             role="admin"

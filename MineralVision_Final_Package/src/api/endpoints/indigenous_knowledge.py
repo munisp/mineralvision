@@ -13,27 +13,54 @@ import json
 import os
 import datetime
 import uuid
-from shapely.geometry import Point, Polygon, shape
+# Heavy geospatial dependencies (shapely, geopandas) are optional.
+# The API boots without them; these endpoints degrade with HTTP 503.
+try:
+    from shapely.geometry import Point, Polygon, shape
+    from ..indigenous_knowledge.core import (
+        KnowledgeHolder,
+        TraditionalKnowledge,
+        CulturalHeritageSite,
+        ResourceArea,
+        ConsultationRecord,
+        BenefitSharingAgreement,
+        IndigenousKnowledgeManager
+    )
+    INDIGENOUS_KNOWLEDGE_AVAILABLE = True
+    _INDIGENOUS_KNOWLEDGE_ERROR: Optional[str] = None
+except ImportError as exc:  # pragma: no cover - depends on optional deps
+    Point = Polygon = shape = None
+    KnowledgeHolder = TraditionalKnowledge = CulturalHeritageSite = None
+    ResourceArea = ConsultationRecord = BenefitSharingAgreement = None
+    IndigenousKnowledgeManager = None
+    INDIGENOUS_KNOWLEDGE_AVAILABLE = False
+    _INDIGENOUS_KNOWLEDGE_ERROR = str(exc)
 
-from ..indigenous_knowledge.core import (
-    KnowledgeHolder, 
-    TraditionalKnowledge,
-    CulturalHeritageSite,
-    ResourceArea,
-    ConsultationRecord,
-    BenefitSharingAgreement,
-    IndigenousKnowledgeManager
-)
+
+def _require_indigenous_knowledge():
+    """Raise HTTP 503 when the geospatial stack is not installed."""
+    if not INDIGENOUS_KNOWLEDGE_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Indigenous knowledge features are unavailable: optional "
+                "geospatial dependencies are not installed "
+                f"({_INDIGENOUS_KNOWLEDGE_ERROR}). Install the optional "
+                "geospatial requirements to enable this feature."
+            )
+        )
+
 
 # Initialize router
 router = APIRouter(
     prefix="/indigenous-knowledge",
     tags=["indigenous-knowledge"],
     responses={404: {"description": "Not found"}},
+    dependencies=[Depends(_require_indigenous_knowledge)],
 )
 
 # Initialize indigenous knowledge manager
-knowledge_manager = IndigenousKnowledgeManager()
+knowledge_manager = IndigenousKnowledgeManager() if INDIGENOUS_KNOWLEDGE_AVAILABLE else None
 
 # Knowledge Holder Endpoints
 
