@@ -103,25 +103,33 @@ class DataFusionEngine:
         if self._ctx is None and self._duckdb_conn is None:
             self.logger.info("Using pandas-based SQL fallback")
     
-    def register_table(self, name: str, path: str, format_type: str = "parquet",
+    def register_table(self, name: str, path: Any, format_type: str = "parquet",
                       options: Optional[Dict[str, str]] = None) -> bool:
         """
         Register a table in the DataFusion context.
-        
+
         Args:
             name: Name of the table
-            path: Path to the data
+            path: Path to the data, or an in-memory pandas DataFrame
             format_type: Format of the data (parquet, csv, etc.)
             options: Additional options for reading the data
-            
+
         Returns:
             bool: True if table was registered successfully
         """
-        self.logger.info(f"Registering table '{name}' from {path} with format {format_type}")
-        
+        self.logger.info(f"Registering table '{name}' with format {format_type}")
+
         try:
             self._tables[name] = path
-            
+
+            if isinstance(path, pd.DataFrame):
+                if self._duckdb_conn is not None:
+                    self._duckdb_conn.register(name, path)
+                elif self._ctx is not None:
+                    self._ctx.register_dataframe(name, path)
+                self.logger.info(f"Successfully registered DataFrame table '{name}'")
+                return True
+
             if self._ctx is not None:
                 if format_type.lower() == 'parquet':
                     self._ctx.register_parquet(name, path)
@@ -430,16 +438,36 @@ class DataFusionEngine:
             self.logger.error(f"Failed to explain query: {str(e)}")
             return f"Error generating execution plan: {str(e)}"
     
-    def execute_geospatial_query(self, query: str) -> Tuple[List[str], List[List[Any]]]:
+    def execute_geospatial_query(self, query: str,
+                                 bounds: Optional[Dict[str, float]] = None,
+                                 lat_column: str = "lat", lon_column: str = "lon") -> Tuple[List[str], List[List[Any]]]:
         """
         Execute a SQL query with geospatial functions.
-        
+
         Args:
-            query: SQL query to execute
-            
+            query: SQL query to execute, or the name of a registered table when
+                ``bounds`` is provided
+            bounds: Optional bounding box filter with keys min_lat, max_lat,
+                min_lon, max_lon. When provided, a bounding-box query is built
+                against the table named by ``query``.
+            lat_column: Name of the latitude column for bounds filtering
+            lon_column: Name of the longitude column for bounds filtering
+
         Returns:
             Tuple[List[str], List[List[Any]]]: Column names and rows of the result
         """
+        if bounds is not None:
+            min_lat = bounds.get("min_lat", -90.0)
+            max_lat = bounds.get("max_lat", 90.0)
+            min_lon = bounds.get("min_lon", -180.0)
+            max_lon = bounds.get("max_lon", 180.0)
+            query = (
+                f"SELECT * FROM {query} "
+                f"WHERE {lat_column} BETWEEN {min_lat} AND {max_lat} "
+                f"AND {lon_column} BETWEEN {min_lon} AND {max_lon}"
+            )
+            self.logger.info(f"Built bounding-box query from bounds: {bounds}")
+
         if not self.config.enable_geospatial:
             self.logger.warning("Geospatial functions are not enabled in the configuration")
             return self.execute_sql(query)

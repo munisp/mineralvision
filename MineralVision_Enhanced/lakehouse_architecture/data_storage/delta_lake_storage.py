@@ -35,11 +35,11 @@ except ImportError:
 class DeltaLakeConfig:
     """Configuration settings for Delta Lake storage."""
     base_path: str
-    raw_zone_path: str
-    processed_zone_path: str
-    curated_zone_path: str
-    feature_zone_path: str
-    checkpoint_path: str
+    raw_zone_path: Optional[str] = None
+    processed_zone_path: Optional[str] = None
+    curated_zone_path: Optional[str] = None
+    feature_zone_path: Optional[str] = None
+    checkpoint_path: Optional[str] = None
     log_level: str = "INFO"
     
     # Delta-specific configurations
@@ -60,7 +60,19 @@ class DeltaLakeConfig:
     
     def __post_init__(self):
         """Initialize derived paths and create directories if they don't exist."""
-        
+
+        # Derive zone paths from base_path when not explicitly provided
+        if self.raw_zone_path is None:
+            self.raw_zone_path = os.path.join(self.base_path, "raw")
+        if self.processed_zone_path is None:
+            self.processed_zone_path = os.path.join(self.base_path, "processed")
+        if self.curated_zone_path is None:
+            self.curated_zone_path = os.path.join(self.base_path, "curated")
+        if self.feature_zone_path is None:
+            self.feature_zone_path = os.path.join(self.base_path, "feature")
+        if self.checkpoint_path is None:
+            self.checkpoint_path = os.path.join(self.base_path, "checkpoints")
+
         # Create directories if they don't exist
         for path in [self.base_path, self.raw_zone_path, self.processed_zone_path, 
                     self.curated_zone_path, self.feature_zone_path, self.checkpoint_path]:
@@ -120,8 +132,21 @@ class DeltaLakeStorage:
         """Get the full path for a table."""
         return os.path.join(self._get_zone_path(zone), table_name)
     
+    @staticmethod
+    def _normalize_schema(schema: Dict) -> Dict:
+        """Normalize a schema dict to the {"fields": [...]} form.
+
+        Accepts either {"fields": [{"name": ..., "type": ...}, ...]} or a flat
+        {"column_name": "type"} mapping.
+        """
+        if "fields" in schema:
+            return schema
+        return {"fields": [{"name": name, "type": str(type_), "nullable": True}
+                           for name, type_ in schema.items()]}
+
     def _schema_dict_to_pyarrow(self, schema: Dict) -> pa.Schema:
         """Convert a schema dictionary to PyArrow schema."""
+        schema = self._normalize_schema(schema)
         type_mapping = {
             "string": pa.string(),
             "int": pa.int64(),
@@ -222,7 +247,8 @@ class DeltaLakeStorage:
         """
         table_path = self._get_table_path(table_name, zone)
         self.logger.info(f"Creating Delta table {table_name} at {table_path}")
-        
+
+        schema = self._normalize_schema(schema)
         try:
             os.makedirs(table_path, exist_ok=True)
             pa_schema = self._schema_dict_to_pyarrow(schema)
