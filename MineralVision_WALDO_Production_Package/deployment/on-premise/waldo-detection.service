@@ -1,0 +1,20 @@
+[Unit]
+Description=MineralVision WALDO Detection Service
+After=network.target postgresql.service rabbitmq-server.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mineralvision/waldo
+ExecStart=/usr/bin/python3 -m waldo_integration.server
+Environment="MODEL_PRECISION=fp16"
+Environment="BATCH_SIZE=4"
+Environment="DATABASE_URI=postgresql://mineralvision:password@localhost:5432/waldo_detections"
+Environment="RABBITMQ_URI=amqp://guest:guest@localhost:5672/"
+Environment="MODELS_DIR=/var/lib/mineralvision/waldo/models"
+Environment="DATA_DIR=/var/lib/mineralvision/waldo/data"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,90 @@
+{
+  "metadata": {
+    "image_id": "aerial_001",
+    "capture_date": "2025-04-10T09:15:00Z",
+    "location": {
+      "latitude": 37.7830,
+      "longitude": -122.4100,
+      "altitude": 250.0
+    },
+    "camera_params": {
+      "focal_length": 28.0,
+      "sensor_width": 36.0,
+      "image_width": 3840,
+      "image_height": 2160
+    },
+    "capture_params": {
+      "exposure": "1/1000",
+      "aperture": "f/5.6",
+      "iso": 200
+    }
+  },
+  "annotations": [
+    {
+      "id": "obj_001",
+      "class": "vehicle",
+      "bbox": [1500, 900, 1650, 1000],
+      "confidence": 0.98,
+      "attributes": {
+        "type": "pickup",
+        "color": "blue",
+        "size": "medium"
+      }
+    },
+    {
+      "id": "obj_002",
+      "class": "equipment",
+      "bbox": [2200, 1100, 2500, 1350],
+      "confidence": 0.94,
+      "attributes": {
+        "type": "bulldozer",
+        "operational_status": "active"
+      }
+    },
+    {
+      "id": "obj_003",
+      "class": "building",
+      "bbox": [800, 500, 1200, 800],
+      "confidence": 0.97,
+      "attributes": {
+        "type": "storage",
+        "size": "large"
+      }
+    },
+    {
+      "id": "obj_004",
+      "class": "person",
+      "bbox": [1700, 950, 1730, 1020],
+      "confidence": 0.85,
+      "attributes": {
+        "posture": "walking",
+        "wearing_ppe": true
+      }
+    }
+  ],
+  "measurements": {
+    "ground_resolution": 0.08,
+    "estimated_dimensions": {
+      "obj_001": {
+        "width": 2.1,
+        "length": 5.3,
+        "area": 11.13
+      },
+      "obj_002": {
+        "width": 3.8,
+        "length": 5.2,
+        "area": 19.76
+      },
+      "obj_003": {
+        "width": 12.5,
+        "length": 18.2,
+        "area": 227.5
+      },
+      "obj_004": {
+        "width": 0.6,
+        "height": 1.75,
+        "area": 1.05
+      }
+    }
+  }
+}

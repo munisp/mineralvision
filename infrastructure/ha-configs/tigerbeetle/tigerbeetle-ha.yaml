@@ -1,0 +1,207 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tigerbeetle
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tigerbeetle-config
+  namespace: tigerbeetle
+data:
+  cluster_id: "0"
+  replica_count: "3"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: tigerbeetle
+  namespace: tigerbeetle
+spec:
+  serviceName: tigerbeetle-headless
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: tigerbeetle
+  template:
+    metadata:
+      labels:
+        app: tigerbeetle
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - tigerbeetle
+              topologyKey: kubernetes.io/hostname
+      initContainers:
+        - name: format
+          image: ghcr.io/tigerbeetle/tigerbeetle:0.15.3
+          command:
+            - /bin/sh
+            - -c
+            - |
+              if [ ! -f /data/0_0.tigerbeetle ]; then
+                REPLICA_ID=${HOSTNAME##*-}
+                ./tigerbeetle format --cluster=0 --replica=$REPLICA_ID --replica-count=3 /data/0_${REPLICA_ID}.tigerbeetle
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      containers:
+        - name: tigerbeetle
+          image: ghcr.io/tigerbeetle/tigerbeetle:0.15.3
+          command:
+            - /bin/sh
+            - -c
+            - |
+              REPLICA_ID=${HOSTNAME##*-}
+              ADDRESSES="tigerbeetle-0.tigerbeetle-headless.tigerbeetle.svc.cluster.local:3001,tigerbeetle-1.tigerbeetle-headless.tigerbeetle.svc.cluster.local:3001,tigerbeetle-2.tigerbeetle-headless.tigerbeetle.svc.cluster.local:3001"
+              ./tigerbeetle start --addresses=$ADDRESSES /data/0_${REPLICA_ID}.tigerbeetle
+          ports:
+            - containerPort: 3000
+              name: client
+            - containerPort: 3001
+              name: cluster
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 5
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tigerbeetle-headless
+  namespace: tigerbeetle
+spec:
+  clusterIP: None
+  selector:
+    app: tigerbeetle
+  ports:
+    - name: client
+      port: 3000
+      targetPort: 3000
+    - name: cluster
+      port: 3001
+      targetPort: 3001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tigerbeetle
+  namespace: tigerbeetle
+spec:
+  selector:
+    app: tigerbeetle
+  ports:
+    - name: client
+      port: 3000
+      targetPort: 3000
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tigerbeetle-pdb
+  namespace: tigerbeetle
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: tigerbeetle
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tigerbeetle-accounts
+  namespace: tigerbeetle
+data:
+  accounts.json: |
+    {
+      "accounts": [
+        {
+          "id": 1,
+          "ledger": 1,
+          "code": 1,
+          "description": "MineralVision Operations Account",
+          "flags": {
+            "linked": false,
+            "debits_must_not_exceed_credits": false,
+            "credits_must_not_exceed_debits": false
+          }
+        },
+        {
+          "id": 2,
+          "ledger": 1,
+          "code": 2,
+          "description": "Exploration Budget Account",
+          "flags": {
+            "linked": false,
+            "debits_must_not_exceed_credits": true,
+            "credits_must_not_exceed_debits": false
+          }
+        },
+        {
+          "id": 3,
+          "ledger": 1,
+          "code": 3,
+          "description": "Equipment Costs Account",
+          "flags": {
+            "linked": false,
+            "debits_must_not_exceed_credits": true,
+            "credits_must_not_exceed_debits": false
+          }
+        },
+        {
+          "id": 4,
+          "ledger": 1,
+          "code": 4,
+          "description": "Analysis Services Account",
+          "flags": {
+            "linked": false,
+            "debits_must_not_exceed_credits": true,
+            "credits_must_not_exceed_debits": false
+          }
+        },
+        {
+          "id": 5,
+          "ledger": 2,
+          "code": 1,
+          "description": "Mineral Credits Ledger",
+          "flags": {
+            "linked": false,
+            "debits_must_not_exceed_credits": false,
+            "credits_must_not_exceed_debits": false
+          }
+        }
+      ]
+    }

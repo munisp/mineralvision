@@ -1,0 +1,95 @@
+{
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "type": "Feature",
+            "properties": {
+                "id": "det_1",
+                "class_name": "vehicle",
+                "confidence": 0.95,
+                "timestamp": 1713437400,
+                "width_m": 2.5,
+                "height_m": 1.8,
+                "area_m2": 4.5,
+                "source": "camera_1",
+                "altitude": 100
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [-122.4194, 37.7749]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "id": "det_2",
+                "class_name": "person",
+                "confidence": 0.87,
+                "timestamp": 1713437700,
+                "width_m": 0.5,
+                "height_m": 1.75,
+                "area_m2": 0.9,
+                "source": "camera_2",
+                "altitude": 120
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [-122.4100, 37.7700]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "id": "det_3",
+                "class_name": "equipment",
+                "confidence": 0.76,
+                "timestamp": 1713438000,
+                "width_m": 3.2,
+                "height_m": 2.1,
+                "area_m2": 6.7,
+                "source": "camera_3",
+                "altitude": 90
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [-122.4300, 37.7800]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "id": "det_4",
+                "class_name": "vehicle",
+                "confidence": 0.92,
+                "timestamp": 1713438300,
+                "width_m": 5.1,
+                "height_m": 2.3,
+                "area_m2": 11.7,
+                "source": "camera_1",
+                "altitude": 110
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [-122.4250, 37.7820]
+            }
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "id": "det_5",
+                "class_name": "equipment",
+                "confidence": 0.89,
+                "timestamp": 1713438600,
+                "width_m": 4.2,
+                "height_m": 3.1,
+                "area_m2": 13.0,
+                "source": "camera_2",
+                "altitude": 95
+            },
+            "geometry": {
+                "type": "Point",
+                "coordinates": [-122.4150, 37.7730]
+            }
+        }
+    ]
+}

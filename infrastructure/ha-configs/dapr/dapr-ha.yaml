@@ -1,0 +1,426 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dapr-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dapr-config
+  namespace: dapr-system
+data:
+  config.yaml: |
+    apiVersion: dapr.io/v1alpha1
+    kind: Configuration
+    metadata:
+      name: mineralvision-config
+    spec:
+      tracing:
+        samplingRate: "1"
+        zipkin:
+          endpointAddress: http://zipkin.observability.svc.cluster.local:9411/api/v2/spans
+      metric:
+        enabled: true
+      mtls:
+        enabled: true
+        workloadCertTTL: 24h
+        allowedClockSkew: 15m
+      accessControl:
+        defaultAction: deny
+        trustDomain: mineralvision.local
+        policies:
+          - appId: api-gateway
+            defaultAction: allow
+            trustDomain: mineralvision.local
+            namespace: mineralvision
+          - appId: sensor-fusion
+            defaultAction: allow
+            trustDomain: mineralvision.local
+            namespace: mineralvision
+          - appId: predictive-modeling
+            defaultAction: allow
+            trustDomain: mineralvision.local
+            namespace: mineralvision
+      features:
+        - name: ServiceInvocation
+          enabled: true
+        - name: StateStore
+          enabled: true
+        - name: PubSub
+          enabled: true
+        - name: Bindings
+          enabled: true
+        - name: Actors
+          enabled: true
+        - name: Secrets
+          enabled: true
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: statestore
+  namespace: mineralvision
+spec:
+  type: state.redis
+  version: v1
+  metadata:
+    - name: redisHost
+      value: redis-master.mineralvision.svc.cluster.local:6379
+    - name: redisPassword
+      secretKeyRef:
+        name: redis-secrets
+        key: redis-password
+    - name: actorStateStore
+      value: "true"
+    - name: enableTLS
+      value: "false"
+    - name: failover
+      value: "true"
+    - name: sentinelMasterName
+      value: mineralvision-master
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: pubsub
+  namespace: mineralvision
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+    - name: brokers
+      value: mineralvision-kafka-kafka-bootstrap.mineralvision.svc.cluster.local:9092
+    - name: consumerGroup
+      value: mineralvision-dapr
+    - name: authRequired
+      value: "false"
+    - name: maxMessageBytes
+      value: "1048576"
+    - name: consumeRetryInterval
+      value: "100ms"
+    - name: version
+      value: "3.6.0"
+---
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: secretstore
+  namespace: mineralvision
+spec:
+  type: secretstores.kubernetes
+  version: v1
+  metadata: []
+---
+apiVersion: dapr.io/v1alpha1
+kind: Resiliency
+metadata:
+  name: mineralvision-resiliency
+  namespace: mineralvision
+spec:
+  policies:
+    timeouts:
+      general: 30s
+      important: 60s
+    retries:
+      retryForever:
+        policy: constant
+        maxInterval: 15s
+        maxRetries: -1
+      important:
+        policy: exponential
+        maxInterval: 30s
+        maxRetries: 10
+      quick:
+        policy: constant
+        duration: 100ms
+        maxRetries: 3
+    circuitBreakers:
+      simpleCB:
+        maxRequests: 1
+        timeout: 30s
+        trip: consecutiveFailures >= 5
+      importantCB:
+        maxRequests: 1
+        timeout: 60s
+        trip: consecutiveFailures >= 10
+  targets:
+    apps:
+      sensor-fusion:
+        timeout: important
+        retry: important
+        circuitBreaker: importantCB
+      predictive-modeling:
+        timeout: important
+        retry: important
+        circuitBreaker: importantCB
+    actors:
+      mineralActors:
+        timeout: general
+        retry: quick
+        circuitBreaker: simpleCB
+    components:
+      statestore:
+        outbound:
+          timeout: general
+          retry: retryForever
+          circuitBreaker: simpleCB
+      pubsub:
+        outbound:
+          timeout: general
+          retry: important
+          circuitBreaker: simpleCB
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: sensor-data-subscription
+  namespace: mineralvision
+spec:
+  pubsubname: pubsub
+  topic: mineralvision-sensor-data
+  route: /sensor-data
+  scopes:
+    - sensor-fusion
+---
+apiVersion: dapr.io/v1alpha1
+kind: Subscription
+metadata:
+  name: predictions-subscription
+  namespace: mineralvision
+spec:
+  pubsubname: pubsub
+  topic: mineralvision-predictions
+  route: /predictions
+  scopes:
+    - api-gateway
+    - web-ui
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dapr-placement
+  namespace: dapr-system
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: dapr-placement
+  template:
+    metadata:
+      labels:
+        app: dapr-placement
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - dapr-placement
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: dapr-placement
+          image: daprio/dapr:1.12.0
+          args:
+            - ./placement
+            - --port=50005
+            - --healthz-port=8080
+            - --metrics-port=9090
+            - --initial-cluster=dapr-placement-0=dapr-placement-0.dapr-placement-headless.dapr-system.svc.cluster.local:8201,dapr-placement-1=dapr-placement-1.dapr-placement-headless.dapr-system.svc.cluster.local:8201,dapr-placement-2=dapr-placement-2.dapr-placement-headless.dapr-system.svc.cluster.local:8201
+          ports:
+            - containerPort: 50005
+              name: api
+            - containerPort: 8080
+              name: healthz
+            - containerPort: 9090
+              name: metrics
+            - containerPort: 8201
+              name: raft
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dapr-placement-headless
+  namespace: dapr-system
+spec:
+  clusterIP: None
+  selector:
+    app: dapr-placement
+  ports:
+    - name: api
+      port: 50005
+      targetPort: 50005
+    - name: raft
+      port: 8201
+      targetPort: 8201
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dapr-placement
+  namespace: dapr-system
+spec:
+  selector:
+    app: dapr-placement
+  ports:
+    - name: api
+      port: 50005
+      targetPort: 50005
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dapr-sentry
+  namespace: dapr-system
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: dapr-sentry
+  template:
+    metadata:
+      labels:
+        app: dapr-sentry
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - dapr-sentry
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: dapr-sentry
+          image: daprio/dapr:1.12.0
+          args:
+            - ./sentry
+            - --port=50001
+            - --healthz-port=8080
+            - --metrics-port=9090
+            - --trust-domain=mineralvision.local
+          ports:
+            - containerPort: 50001
+              name: api
+            - containerPort: 8080
+              name: healthz
+            - containerPort: 9090
+              name: metrics
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dapr-sentry
+  namespace: dapr-system
+spec:
+  selector:
+    app: dapr-sentry
+  ports:
+    - name: api
+      port: 50001
+      targetPort: 50001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dapr-operator
+  namespace: dapr-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: dapr-operator
+  template:
+    metadata:
+      labels:
+        app: dapr-operator
+    spec:
+      serviceAccountName: dapr-operator
+      containers:
+        - name: dapr-operator
+          image: daprio/dapr:1.12.0
+          args:
+            - ./operator
+            - --port=6500
+            - --healthz-port=8080
+            - --metrics-port=9090
+          ports:
+            - containerPort: 6500
+              name: api
+            - containerPort: 8080
+              name: healthz
+            - containerPort: 9090
+              name: metrics
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dapr-placement-pdb
+  namespace: dapr-system
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: dapr-placement
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dapr-sentry-pdb
+  namespace: dapr-system
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: dapr-sentry

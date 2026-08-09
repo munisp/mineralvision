@@ -1,0 +1,405 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mineralvision
+  labels:
+    istio-injection: enabled
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: mineralvision-quota
+  namespace: mineralvision
+spec:
+  hard:
+    requests.cpu: "100"
+    requests.memory: 200Gi
+    limits.cpu: "200"
+    limits.memory: 400Gi
+    persistentvolumeclaims: "50"
+    pods: "200"
+    services: "50"
+    secrets: "100"
+    configmaps: "100"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: mineralvision-limits
+  namespace: mineralvision
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:
+        cpu: "100m"
+        memory: "128Mi"
+      max:
+        cpu: "8"
+        memory: "16Gi"
+      min:
+        cpu: "50m"
+        memory: "64Mi"
+    - type: PersistentVolumeClaim
+      max:
+        storage: "500Gi"
+      min:
+        storage: "1Gi"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: mineralvision
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-internal
+  namespace: mineralvision
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: mineralvision
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: mineralvision
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: mineralvision
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-service-hpa
+  namespace: mineralvision
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-service
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 10
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+        - type: Pods
+          value: 4
+          periodSeconds: 15
+      selectPolicy: Max
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sensor-fusion-hpa
+  namespace: mineralvision
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sensor-fusion
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: predictive-modeling-hpa
+  namespace: mineralvision
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: predictive-modeling
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api-service-pdb
+  namespace: mineralvision
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: api-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: sensor-fusion-pdb
+  namespace: mineralvision
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: sensor-fusion
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: predictive-modeling-pdb
+  namespace: mineralvision
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: predictive-modeling
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: mineralvision-critical
+value: 1000000
+globalDefault: false
+description: "Critical MineralVision services"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: mineralvision-high
+value: 100000
+globalDefault: false
+description: "High priority MineralVision services"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: mineralvision-normal
+value: 10000
+globalDefault: true
+description: "Normal priority MineralVision services"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-autoscaler-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    cluster-autoscaler:
+      cloud-provider: aws
+      skip-nodes-with-local-storage: false
+      skip-nodes-with-system-pods: true
+      balance-similar-node-groups: true
+      expander: least-waste
+      scale-down-enabled: true
+      scale-down-delay-after-add: 10m
+      scale-down-delay-after-delete: 0s
+      scale-down-delay-after-failure: 3m
+      scale-down-unneeded-time: 10m
+      scale-down-unready-time: 20m
+      scale-down-utilization-threshold: 0.5
+      max-node-provision-time: 15m
+      max-graceful-termination-sec: 600
+      max-total-unready-percentage: 45
+      ok-total-unready-count: 3
+      max-empty-bulk-delete: 10
+      new-pod-scale-up-delay: 0s
+      ignore-daemonsets-utilization: false
+      ignore-mirror-pods-utilization: false
+      node-groups:
+        - name: mineralvision-general
+          min-size: 3
+          max-size: 20
+          instance-types:
+            - m5.xlarge
+            - m5.2xlarge
+        - name: mineralvision-compute
+          min-size: 2
+          max-size: 10
+          instance-types:
+            - c5.2xlarge
+            - c5.4xlarge
+        - name: mineralvision-memory
+          min-size: 2
+          max-size: 10
+          instance-types:
+            - r5.2xlarge
+            - r5.4xlarge
+        - name: mineralvision-gpu
+          min-size: 0
+          max-size: 5
+          instance-types:
+            - p3.2xlarge
+            - g4dn.xlarge
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kube-prometheus-stack-values
+  namespace: monitoring
+data:
+  values.yaml: |
+    prometheus:
+      prometheusSpec:
+        replicas: 2
+        retention: 30d
+        retentionSize: 50GB
+        resources:
+          requests:
+            memory: 4Gi
+            cpu: 2
+          limits:
+            memory: 8Gi
+            cpu: 4
+        storageSpec:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: fast-ssd
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 100Gi
+        podAntiAffinity: hard
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+    alertmanager:
+      alertmanagerSpec:
+        replicas: 3
+        podAntiAffinity: hard
+        storage:
+          volumeClaimTemplate:
+            spec:
+              storageClassName: fast-ssd
+              accessModes: ["ReadWriteOnce"]
+              resources:
+                requests:
+                  storage: 10Gi
+    grafana:
+      replicas: 2
+      persistence:
+        enabled: true
+        storageClassName: fast-ssd
+        size: 20Gi
+      adminPassword: mineralvision_grafana_password_change_me
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@mineralvision.local
+    privateKeySecretRef:
+      name: letsencrypt-prod-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: mineralvision-tls
+  namespace: mineralvision
+spec:
+  secretName: mineralvision-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - mineralvision.local
+    - api.mineralvision.local
+    - auth.mineralvision.local
+    - dashboard.mineralvision.local

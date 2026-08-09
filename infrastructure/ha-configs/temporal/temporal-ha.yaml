@@ -1,0 +1,509 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: temporal
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: temporal-config
+  namespace: temporal
+data:
+  config_template.yaml: |
+    log:
+      stdout: true
+      level: info
+    persistence:
+      defaultStore: default
+      visibilityStore: visibility
+      numHistoryShards: 512
+      datastores:
+        default:
+          sql:
+            pluginName: postgres
+            databaseName: temporal
+            connectAddr: "postgresql-ha-pgpool:5432"
+            connectProtocol: tcp
+            user: temporal
+            maxConns: 20
+            maxIdleConns: 20
+            maxConnLifetime: 1h
+        visibility:
+          sql:
+            pluginName: postgres
+            databaseName: temporal_visibility
+            connectAddr: "postgresql-ha-pgpool:5432"
+            connectProtocol: tcp
+            user: temporal
+            maxConns: 10
+            maxIdleConns: 10
+            maxConnLifetime: 1h
+    global:
+      membership:
+        maxJoinDuration: 30s
+        broadcastAddress: "{{ default .Env.POD_IP \"0.0.0.0\" }}"
+      pprof:
+        port: 7936
+      metrics:
+        prometheus:
+          timerType: histogram
+          listenAddress: "0.0.0.0:9090"
+    services:
+      frontend:
+        rpc:
+          grpcPort: 7233
+          membershipPort: 6933
+          bindOnLocalHost: false
+          bindOnIP: "0.0.0.0"
+      history:
+        rpc:
+          grpcPort: 7234
+          membershipPort: 6934
+          bindOnLocalHost: false
+          bindOnIP: "0.0.0.0"
+      matching:
+        rpc:
+          grpcPort: 7235
+          membershipPort: 6935
+          bindOnLocalHost: false
+          bindOnIP: "0.0.0.0"
+      worker:
+        rpc:
+          grpcPort: 7239
+          membershipPort: 6939
+          bindOnLocalHost: false
+          bindOnIP: "0.0.0.0"
+    clusterMetadata:
+      enableGlobalNamespace: false
+      failoverVersionIncrement: 10
+      masterClusterName: active
+      currentClusterName: active
+      clusterInformation:
+        active:
+          enabled: true
+          initialFailoverVersion: 1
+          rpcName: frontend
+          rpcAddress: "temporal-frontend:7233"
+    dcRedirectionPolicy:
+      policy: noop
+    archival:
+      history:
+        state: enabled
+        enableRead: true
+        provider:
+          filestore:
+            fileMode: "0666"
+            dirMode: "0766"
+      visibility:
+        state: enabled
+        enableRead: true
+        provider:
+          filestore:
+            fileMode: "0666"
+            dirMode: "0766"
+    namespaceDefaults:
+      archival:
+        history:
+          state: enabled
+          URI: "file:///tmp/temporal_archival/development"
+        visibility:
+          state: enabled
+          URI: "file:///tmp/temporal_vis_archival/development"
+    publicClient:
+      hostPort: "temporal-frontend:7233"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-frontend
+  namespace: temporal
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: temporal
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: temporal
+        component: frontend
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values:
+                        - frontend
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: temporal-frontend
+          image: temporalio/server:1.22.0
+          env:
+            - name: SERVICES
+              value: frontend
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: DB_PORT
+              value: "5432"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-secrets
+                  key: postgres-user
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-secrets
+                  key: postgres-password
+          ports:
+            - containerPort: 7233
+              name: grpc
+            - containerPort: 6933
+              name: membership
+            - containerPort: 9090
+              name: metrics
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1"
+          livenessProbe:
+            tcpSocket:
+              port: 7233
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 7233
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/temporal/config/config_template.yaml
+              subPath: config_template.yaml
+      volumes:
+        - name: config
+          configMap:
+            name: temporal-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-history
+  namespace: temporal
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: temporal
+      component: history
+  template:
+    metadata:
+      labels:
+        app: temporal
+        component: history
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values:
+                        - history
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: temporal-history
+          image: temporalio/server:1.22.0
+          env:
+            - name: SERVICES
+              value: history
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: DB_PORT
+              value: "5432"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-secrets
+                  key: postgres-user
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-secrets
+                  key: postgres-password
+          ports:
+            - containerPort: 7234
+              name: grpc
+            - containerPort: 6934
+              name: membership
+            - containerPort: 9090
+              name: metrics
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/temporal/config/config_template.yaml
+              subPath: config_template.yaml
+      volumes:
+        - name: config
+          configMap:
+            name: temporal-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-matching
+  namespace: temporal
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: temporal
+      component: matching
+  template:
+    metadata:
+      labels:
+        app: temporal
+        component: matching
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values:
+                        - matching
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: temporal-matching
+          image: temporalio/server:1.22.0
+          env:
+            - name: SERVICES
+              value: matching
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: DB_PORT
+              value: "5432"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-secrets
+                  key: postgres-user
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-secrets
+                  key: postgres-password
+          ports:
+            - containerPort: 7235
+              name: grpc
+            - containerPort: 6935
+              name: membership
+            - containerPort: 9090
+              name: metrics
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/temporal/config/config_template.yaml
+              subPath: config_template.yaml
+      volumes:
+        - name: config
+          configMap:
+            name: temporal-config
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker
+  namespace: temporal
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: temporal
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: temporal
+        component: worker
+    spec:
+      containers:
+        - name: temporal-worker
+          image: temporalio/server:1.22.0
+          env:
+            - name: SERVICES
+              value: worker
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: DB_PORT
+              value: "5432"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-secrets
+                  key: postgres-user
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  name: temporal-secrets
+                  key: postgres-password
+          ports:
+            - containerPort: 7239
+              name: grpc
+            - containerPort: 6939
+              name: membership
+            - containerPort: 9090
+              name: metrics
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/temporal/config/config_template.yaml
+              subPath: config_template.yaml
+      volumes:
+        - name: config
+          configMap:
+            name: temporal-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-frontend
+  namespace: temporal
+spec:
+  selector:
+    app: temporal
+    component: frontend
+  ports:
+    - name: grpc
+      port: 7233
+      targetPort: 7233
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-history
+  namespace: temporal
+spec:
+  selector:
+    app: temporal
+    component: history
+  ports:
+    - name: grpc
+      port: 7234
+      targetPort: 7234
+  clusterIP: None
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-matching
+  namespace: temporal
+spec:
+  selector:
+    app: temporal
+    component: matching
+  ports:
+    - name: grpc
+      port: 7235
+      targetPort: 7235
+  clusterIP: None
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: temporal-secrets
+  namespace: temporal
+type: Opaque
+stringData:
+  postgres-user: temporal
+  postgres-password: temporal_password_change_me
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-ui
+  namespace: temporal
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: temporal-ui
+  template:
+    metadata:
+      labels:
+        app: temporal-ui
+    spec:
+      containers:
+        - name: temporal-ui
+          image: temporalio/ui:2.21.0
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: temporal-frontend:7233
+            - name: TEMPORAL_CORS_ORIGINS
+              value: http://localhost:3000
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-ui
+  namespace: temporal
+spec:
+  selector:
+    app: temporal-ui
+  ports:
+    - port: 8080
+      targetPort: 8080

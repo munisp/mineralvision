@@ -1,0 +1,707 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lakehouse
+---
+# RustFS Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rustfs-config
+  namespace: lakehouse
+data:
+  # RustFS server configuration
+  config.toml: |
+    [server]
+    # Bind address for S3 API
+    bind_address = "0.0.0.0:9000"
+    # Bind address for console/admin API
+    console_address = "0.0.0.0:9001"
+    # Region for S3 compatibility
+    region = "us-east-1"
+    
+    [storage]
+    # Data directory
+    data_dir = "/data"
+    # Enable erasure coding for distributed mode
+    erasure_coding = true
+    # Number of data shards
+    data_shards = 4
+    # Number of parity shards
+    parity_shards = 2
+    
+    [performance]
+    # Number of worker threads (0 = auto)
+    workers = 0
+    # Max concurrent connections
+    max_connections = 10000
+    # Read buffer size
+    read_buffer_size = "64KB"
+    # Write buffer size
+    write_buffer_size = "64KB"
+    
+    [cache]
+    # Enable read cache
+    enabled = true
+    # Cache size (memory)
+    size = "1GB"
+    # Cache TTL
+    ttl = "1h"
+    
+    [logging]
+    level = "info"
+    format = "json"
+    
+    [metrics]
+    # Prometheus metrics endpoint
+    enabled = true
+    path = "/metrics"
+    
+    [health]
+    # Health check endpoints
+    live_path = "/health/live"
+    ready_path = "/health/ready"
+---
+# Spark Configuration (updated for RustFS)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spark-config
+  namespace: lakehouse
+data:
+  spark-defaults.conf: |
+    spark.master                                   k8s://https://kubernetes.default.svc
+    spark.kubernetes.container.image               apache/spark:3.5.0
+    spark.kubernetes.namespace                     lakehouse
+    spark.kubernetes.authenticate.driver.serviceAccountName spark
+    spark.kubernetes.driver.pod.name               spark-driver
+    spark.kubernetes.executor.request.cores        1
+    spark.kubernetes.executor.limit.cores          2
+    spark.executor.instances                       3
+    spark.executor.memory                          4g
+    spark.executor.cores                           2
+    spark.driver.memory                            2g
+    spark.driver.cores                             1
+    spark.sql.extensions                           io.delta.sql.DeltaSparkSessionExtension
+    spark.sql.catalog.spark_catalog                org.apache.spark.sql.delta.catalog.DeltaCatalog
+    spark.databricks.delta.retentionDurationCheck.enabled false
+    spark.sql.warehouse.dir                        s3a://mineralvision-lakehouse/warehouse
+    # RustFS endpoint (S3-compatible)
+    spark.hadoop.fs.s3a.endpoint                   http://rustfs.lakehouse.svc.cluster.local:9000
+    spark.hadoop.fs.s3a.access.key                 ${AWS_ACCESS_KEY_ID}
+    spark.hadoop.fs.s3a.secret.key                 ${AWS_SECRET_ACCESS_KEY}
+    spark.hadoop.fs.s3a.path.style.access          true
+    spark.hadoop.fs.s3a.impl                       org.apache.hadoop.fs.s3a.S3AFileSystem
+    # RustFS-specific optimizations
+    spark.hadoop.fs.s3a.connection.maximum         200
+    spark.hadoop.fs.s3a.threads.max                64
+    spark.hadoop.fs.s3a.fast.upload                true
+    spark.hadoop.fs.s3a.fast.upload.buffer         bytebuffer
+    spark.hadoop.fs.s3a.multipart.size             67108864
+    spark.eventLog.enabled                         true
+    spark.eventLog.dir                             s3a://mineralvision-lakehouse/spark-events
+    spark.history.fs.logDirectory                  s3a://mineralvision-lakehouse/spark-events
+    spark.ui.prometheus.enabled                    true
+    spark.metrics.conf.*.sink.prometheusServlet.class org.apache.spark.metrics.sink.PrometheusServlet
+    spark.metrics.conf.*.sink.prometheusServlet.path /metrics/prometheus
+---
+# Delta Lake Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: delta-config
+  namespace: lakehouse
+data:
+  delta-defaults.conf: |
+    delta.logRetentionDuration=interval 30 days
+    delta.deletedFileRetentionDuration=interval 7 days
+    delta.enableChangeDataFeed=true
+    delta.autoOptimize.optimizeWrite=true
+    delta.autoOptimize.autoCompact=true
+    delta.checkpoint.writeStatsAsJson=true
+    delta.checkpoint.writeStatsAsStruct=true
+---
+# RustFS StatefulSet (replaces MinIO)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rustfs
+  namespace: lakehouse
+  labels:
+    app: rustfs
+    component: object-storage
+spec:
+  serviceName: rustfs-headless
+  replicas: 4
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: rustfs
+  template:
+    metadata:
+      labels:
+        app: rustfs
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+        prometheus.io/path: "/metrics"
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - rustfs
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: rustfs
+          image: rustfs/rustfs:1.0.0-alpha.72
+          args:
+            - server
+            - --config
+            - /etc/rustfs/config.toml
+            - http://rustfs-{0...3}.rustfs-headless.lakehouse.svc.cluster.local/data
+          env:
+            - name: RUSTFS_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-secrets
+                  key: root-user
+            - name: RUSTFS_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-secrets
+                  key: root-password
+            - name: RUSTFS_PROMETHEUS_AUTH_TYPE
+              value: public
+            - name: RUST_LOG
+              value: info
+            - name: RUST_BACKTRACE
+              value: "1"
+          ports:
+            - containerPort: 9000
+              name: api
+              protocol: TCP
+            - containerPort: 9001
+              name: console
+              protocol: TCP
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/rustfs
+      volumes:
+        - name: config
+          configMap:
+            name: rustfs-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 500Gi
+---
+# RustFS Secrets
+# NOTE: Replace these placeholder values with actual credentials in production
+# Use external-secrets or sealed-secrets for production deployments
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rustfs-secrets
+  namespace: lakehouse
+type: Opaque
+stringData:
+  root-user: REPLACE_WITH_ACTUAL_USERNAME
+  root-password: REPLACE_WITH_ACTUAL_PASSWORD
+---
+# RustFS Headless Service (for StatefulSet DNS)
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs-headless
+  namespace: lakehouse
+spec:
+  clusterIP: None
+  selector:
+    app: rustfs
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+# RustFS Service (load balanced)
+apiVersion: v1
+kind: Service
+metadata:
+  name: rustfs
+  namespace: lakehouse
+  labels:
+    app: rustfs
+spec:
+  type: ClusterIP
+  selector:
+    app: rustfs
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+# Spark History Server (updated for RustFS)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-history-server
+  namespace: lakehouse
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: spark-history-server
+  template:
+    metadata:
+      labels:
+        app: spark-history-server
+    spec:
+      serviceAccountName: spark
+      containers:
+        - name: spark-history-server
+          image: apache/spark:3.5.0
+          command:
+            - /opt/spark/sbin/start-history-server.sh
+          env:
+            - name: SPARK_HISTORY_OPTS
+              value: >-
+                -Dspark.history.fs.logDirectory=s3a://mineralvision-lakehouse/spark-events
+                -Dspark.hadoop.fs.s3a.endpoint=http://rustfs.lakehouse.svc.cluster.local:9000
+                -Dspark.hadoop.fs.s3a.access.key=$(AWS_ACCESS_KEY_ID)
+                -Dspark.hadoop.fs.s3a.secret.key=$(AWS_SECRET_ACCESS_KEY)
+                -Dspark.hadoop.fs.s3a.path.style.access=true
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-secrets
+                  key: root-user
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: rustfs-secrets
+                  key: root-password
+          ports:
+            - containerPort: 18080
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1"
+          volumeMounts:
+            - name: spark-config
+              mountPath: /opt/spark/conf/spark-defaults.conf
+              subPath: spark-defaults.conf
+      volumes:
+        - name: spark-config
+          configMap:
+            name: spark-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-history-server
+  namespace: lakehouse
+spec:
+  selector:
+    app: spark-history-server
+  ports:
+    - port: 18080
+      targetPort: 18080
+---
+# Spark Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark
+  namespace: lakehouse
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spark-role
+  namespace: lakehouse
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spark-role-binding
+  namespace: lakehouse
+subjects:
+  - kind: ServiceAccount
+    name: spark
+    namespace: lakehouse
+roleRef:
+  kind: Role
+  name: spark-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# Trino Coordinator (updated for RustFS)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trino-coordinator
+  namespace: lakehouse
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: trino
+      component: coordinator
+  template:
+    metadata:
+      labels:
+        app: trino
+        component: coordinator
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values:
+                        - coordinator
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: trino
+          image: trinodb/trino:435
+          ports:
+            - containerPort: 8080
+          env:
+            - name: TRINO_ENVIRONMENT
+              value: production
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2"
+            limits:
+              memory: "8Gi"
+              cpu: "4"
+          volumeMounts:
+            - name: trino-config
+              mountPath: /etc/trino
+      volumes:
+        - name: trino-config
+          configMap:
+            name: trino-coordinator-config
+---
+# Trino Workers
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: trino-worker
+  namespace: lakehouse
+spec:
+  serviceName: trino-worker-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: trino
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: trino
+        component: worker
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values:
+                        - worker
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: trino
+          image: trinodb/trino:435
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: "8Gi"
+              cpu: "4"
+            limits:
+              memory: "16Gi"
+              cpu: "8"
+          volumeMounts:
+            - name: trino-config
+              mountPath: /etc/trino
+      volumes:
+        - name: trino-config
+          configMap:
+            name: trino-worker-config
+---
+# Trino Coordinator Config (updated for RustFS)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-coordinator-config
+  namespace: lakehouse
+data:
+  node.properties: |
+    node.environment=production
+    node.id=${HOSTNAME}
+    node.data-dir=/data/trino
+  jvm.config: |
+    -server
+    -Xmx6G
+    -XX:+UseG1GC
+    -XX:G1HeapRegionSize=32M
+    -XX:+UseGCOverheadLimit
+    -XX:+ExplicitGCInvokesConcurrent
+    -XX:+HeapDumpOnOutOfMemoryError
+    -XX:+ExitOnOutOfMemoryError
+    -Djdk.attach.allowAttachSelf=true
+  config.properties: |
+    coordinator=true
+    node-scheduler.include-coordinator=false
+    http-server.http.port=8080
+    query.max-memory=4GB
+    query.max-memory-per-node=1GB
+    discovery.uri=http://trino-coordinator:8080
+  catalog/delta.properties: |
+    connector.name=delta_lake
+    hive.metastore.uri=thrift://hive-metastore:9083
+    # RustFS endpoint (S3-compatible)
+    hive.s3.endpoint=http://rustfs.lakehouse.svc.cluster.local:9000
+    hive.s3.path-style-access=true
+    hive.s3.aws-access-key=${AWS_ACCESS_KEY_ID}
+    hive.s3.aws-secret-key=${AWS_SECRET_ACCESS_KEY}
+    delta.enable-non-concurrent-writes=true
+---
+# Trino Worker Config (updated for RustFS)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-worker-config
+  namespace: lakehouse
+data:
+  node.properties: |
+    node.environment=production
+    node.id=${HOSTNAME}
+    node.data-dir=/data/trino
+  jvm.config: |
+    -server
+    -Xmx12G
+    -XX:+UseG1GC
+    -XX:G1HeapRegionSize=32M
+    -XX:+UseGCOverheadLimit
+    -XX:+ExplicitGCInvokesConcurrent
+    -XX:+HeapDumpOnOutOfMemoryError
+    -XX:+ExitOnOutOfMemoryError
+    -Djdk.attach.allowAttachSelf=true
+  config.properties: |
+    coordinator=false
+    http-server.http.port=8080
+    query.max-memory=4GB
+    query.max-memory-per-node=2GB
+    discovery.uri=http://trino-coordinator:8080
+  catalog/delta.properties: |
+    connector.name=delta_lake
+    hive.metastore.uri=thrift://hive-metastore:9083
+    # RustFS endpoint (S3-compatible)
+    hive.s3.endpoint=http://rustfs.lakehouse.svc.cluster.local:9000
+    hive.s3.path-style-access=true
+    hive.s3.aws-access-key=${AWS_ACCESS_KEY_ID}
+    hive.s3.aws-secret-key=${AWS_SECRET_ACCESS_KEY}
+    delta.enable-non-concurrent-writes=true
+---
+# Trino Services
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino-coordinator
+  namespace: lakehouse
+spec:
+  selector:
+    app: trino
+    component: coordinator
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino-worker-headless
+  namespace: lakehouse
+spec:
+  clusterIP: None
+  selector:
+    app: trino
+    component: worker
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+# Pod Disruption Budgets
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: rustfs-pdb
+  namespace: lakehouse
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: rustfs
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: trino-worker-pdb
+  namespace: lakehouse
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: trino
+      component: worker
+---
+# Horizontal Pod Autoscaler for RustFS (optional)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: rustfs-hpa
+  namespace: lakehouse
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: rustfs
+  minReplicas: 4
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+---
+# Network Policy for RustFS
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rustfs-network-policy
+  namespace: lakehouse
+spec:
+  podSelector:
+    matchLabels:
+      app: rustfs
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow from same namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: lakehouse
+      ports:
+        - protocol: TCP
+          port: 9000
+        - protocol: TCP
+          port: 9001
+    # Allow from mineralvision namespace
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: mineralvision
+      ports:
+        - protocol: TCP
+          port: 9000
+    # Allow Prometheus scraping
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9000
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+    # Allow inter-pod communication
+    - to:
+        - podSelector:
+            matchLabels:
+              app: rustfs
+      ports:
+        - protocol: TCP
+          port: 9000

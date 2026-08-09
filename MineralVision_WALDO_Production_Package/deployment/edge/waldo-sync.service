@@ -1,0 +1,18 @@
+[Unit]
+Description=MineralVision WALDO Data Synchronization Service
+After=network.target waldo-edge.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mineralvision/waldo
+ExecStart=/usr/bin/python3 -m waldo_integration.sync_client
+Environment="DATABASE_PATH=/var/lib/mineralvision/waldo/database/waldo.db"
+Environment="CENTRAL_SERVER_URL=https://waldo.mineralvision.com/api"
+Environment="SYNC_INTERVAL=3600"
+Environment="DEVICE_ID=${HOSTNAME}"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

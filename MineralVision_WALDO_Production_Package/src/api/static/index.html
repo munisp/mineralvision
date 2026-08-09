@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MineralVision WALDO Integration</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding-top: 56px;
+        }
+        .sidebar {
+            height: calc(100vh - 56px);
+            position: fixed;
+            top: 56px;
+            left: 0;
+            width: 250px;
+            z-index: 100;
+            padding: 20px 0;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+        }
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+        }
+        .map-container {
+            height: 500px;
+            width: 100%;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        .detection-card {
+            margin-bottom: 15px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .detection-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .dashboard-card {
+            height: 100%;
+            transition: all 0.2s ease;
+        }
+        .dashboard-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .chart-container {
+            height: 300px;
+            width: 100%;
+        }
+        .upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 5px;
+            padding: 25px;
+            text-align: center;
+            background-color: #f8f9fa;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .upload-area:hover {
+            border-color: #0d6efd;
+            background-color: #f1f8ff;
+        }
+        .detection-image {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            border-radius: 5px 5px 0 0;
+        }
+        .nav-link {
+            color: #495057;
+            padding: 8px 20px;
+            margin: 2px 0;
+            border-radius: 0;
+        }
+        .nav-link:hover {
+            background-color: #e9ecef;
+        }
+        .nav-link.active {
+            color: #0d6efd;
+            background-color: #e9ecef;
+            font-weight: 500;
+        }
+        .nav-heading {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #6c757d;
+            padding: 12px 20px 5px;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark fixed-top">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <img src="logo.png" alt="MineralVision" height="30" class="d-inline-block align-text-top me-2">
+                MineralVision WALDO
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-bs-toggle="modal" data-bs-target="#helpModal">
+                            <i class="bi bi-question-circle"></i> Help
+                        </a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="bi bi-person-circle"></i> Admin
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end">
+                            <li><a class="dropdown-item" href="#">Profile</a></li>
+                            <li><a class="dropdown-item" href="#">Settings</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#">Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="nav flex-column">
+            <a class="nav-link active" href="#dashboard">
+                <i class="bi bi-speedometer2"></i> Dashboard
+            </a>
+            <div class="nav-heading">Detection</div>
+            <a class="nav-link" href="#upload">
+                <i class="bi bi-cloud-upload"></i> Upload Data
+            </a>
+            <a class="nav-link" href="#detections">
+                <i class="bi bi-box"></i> Detections
+            </a>
+            <a class="nav-link" href="#tracking">
+                <i class="bi bi-record-circle"></i> Tracking
+            </a>
+            <div class="nav-heading">Analysis</div>
+            <a class="nav-link" href="#visualization">
+                <i class="bi bi-graph-up"></i> Visualization
+            </a>
+            <a class="nav-link" href="#reports">
+                <i class="bi bi-file-earmark-text"></i> Reports
+            </a>
+            <a class="nav-link" href="#arcgis">
+                <i class="bi bi-map"></i> ArcGIS Maps
+            </a>
+            <div class="nav-heading">System</div>
+            <a class="nav-link" href="#settings">
+                <i class="bi bi-gear"></i> Settings
+            </a>
+            <a class="nav-link" href="#users">
+                <i class="bi bi-people"></i> Users
+            </a>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Dashboard Section -->
+        <div id="dashboard" class="mb-5">
+            <h2 class="mb-4">Dashboard</h2>
+            <div class="row">
+                <div class="col-md-3 mb-4">
+                    <div class="card dashboard-card">
+                        <div class="card-body">
+                            <h5 class="card-title">Total Detections</h5>
+                            <h2 class="display-4">1,256</h2>
+                            <p class="text-success">
+                                <i class="bi bi-arrow-up"></i> 12% increase
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-4">
+                    <div class="card dashboard-card">
+                        <div class="card-body">
+                            <h5 class="card-title">Processing Jobs</h5>
+                            <h2 class="display-4">3</h2>
+                            <p class="text-muted">2 completed, 1 in progress</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-4">
+                    <div class="card dashboard-card">
+                        <div class="card-body">
+                            <h5 class="card-title">Object Classes</h5>
+                            <h2 class="display-4">8</h2>
+                            <p class="text-muted">Across all detections</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3 mb-4">
+                    <div class="card dashboard-card">
+                        <div class="card-body">
+                            <h5 class="card-title">System Status</h5>
+                            <h2 class="display-4 text-success">
+                                <i class="bi bi-check-circle"></i>
+                            </h2>
+                            <p class="text-muted">All systems operational</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-8 mb-4">
+                    <div class="card dashboard-card">
+                        <div class="card-body">
+                            <h5 class="card-title">Detection Trends</h5>
+                            <div class="chart-container">
+                                <canvas id="trendsChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-4">
+                    <div class="card dashboard-card">
+                        <div class="card-body">
+                            <h5 class="card-title">Detection by Class</h5>
+                            <div class="chart-container">
+                                <canvas id="classChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-md-12 mb-4">
+                    <div class="card dashboard-card">
+                        <div class="card-body">
+                            <h5 class="card-title">Recent Detections Map</h5>
+                            <div id="map" class="map-container"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Upload Section -->
+        <div id="upload" class="mb-5 d-none">
+            <h2 class="mb-4">Upload Data</h2>
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">Upload Files for Detection</h5>
+                            <div class="upload-area" id="dropArea">
+                                <i class="bi bi-cloud-upload display-4"></i>
+                                <h4 class="mt-3">Drag & Drop Files Here</h4>
+                                <p class="text-muted">or click to browse</p>
+                                <input type="file" id="fileInput" class="d-none" multiple>
+                            </div>
+                            <div class="progress mt-3 d-none" id="uploadProgress">
+                                <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <div id="uploadedFiles" class="mt-3"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">Detection Settings</h5>
+                            <form id="detectionSettings">
+                                <div class="mb-3">
+                                    <label for="confidenceThreshold" class="form-label">Confidence Threshold</label>
+                                    <input type="range" class="form-range" id="confidenceThreshold" min="0" max="1" step="0.05" value="0.25">
+                                    <div class="d-flex justify-content-between">
+                                        <span>0.0</span>
+                                        <span id="confidenceValue">0.25</span>
+                                        <span>1.0</span>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Object Classes</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" value="" id="classAll" checked>
+                                        <label class="form-check-label" for="classAll">
+                                            All Classes
+                                        </label>
+                                    </div>
+                                    <div id="classOptions" class="ms-3 d-none">
+                                        <!-- Class options will be populated dynamically -->
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">Processing Options</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" value="" id="enableTracking" checked>
+                                        <label class="form-check-label" for="enableTracking">
+                                            Enable Object Tracking
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" value="" id="enableMeasurements" checked>
+                                        <label class="form-check-label" for="enableMeasurements">
+                                            Calculate Measurements
+                                        </label>
+                                    </div>
+                                </div>
+                                <button type="submit" class="btn btn-primary w-100" disabled id="startProcessingBtn">
+                                    Start Processing
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detections Section -->
+        <div id="detections" class="mb-5 d-none">
+            <h2 class="mb-4">Detections</h2>
+            <div class="row mb-4">
+                <div class="col-md-12">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">Filter Detections</h5>
+                            <form class="row g-3">
+                                <div class="col-md-3">
+                                    <label for="sourceFilter" class="form-label">Source</label>
+                                    <select class="form-select" id="sourceFilter">
+                                        <option value="">All Sources</option>
+                                        <option value="camera_1">Camera 1</option>
+                                        <option value="drone_1">Drone 1</option>
+                                        <option value="upload">Uploaded Files</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="classFilter" class="form-label">Class</label>
+                                    <select class="form-select" id="classFilter">
+                                        <option value="">All Classes</option>
+                                        <option value="vehicle">Vehicle</option>
+                                        <option value="person">Person</option>
+                                        <option value="equipment">Equipment</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="dateFilter" class="form-label">Date Range</label>
+                                    <select class="form-select" id="dateFilter">
+                                        <option value="today">Today</option>
+                                        <option value="yesterday">Yesterday</option>
+                                        <option value="week">Last 7 Days</option>
+                                        <option value="month">Last 30 Days</option>
+                                        <option value="custom">Custom Range</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label for="confidenceFilter" class="form-label">Min. Confidence</label>
+                                    <input type="range" class="form-range" id="confidenceFilter" min="0" max="1" step="0.05" value="0.25">
+                                    <div class="d-flex justify-content-between">
+                                        <span>0.0</span>
+                                        <span id="confidenceFilterValue">0.25</span>
+                                        <span>1.0</span>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <button type="submit" class="btn btn-primary">Apply Filters</button>
+                                    <button type="reset" class="btn btn-outline-secondary">Reset</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <!-- Detection cards will be populated dynamically -->
+                <div class="col-md-4 mb-4">
+                    <div class="card detection-card">
+                        <img src="sample_data/detection_1.jpg" class="detection-image" alt="Detection">
+                        <div class="card-body">
+                            <h5 class="card-title">Vehicle Detection</h5>
+                            <p class="card-text">
+                                <span class="badge bg-success">Confidence: 0.95</span>
+                                <span class="badge bg-info">Class: Vehicle</span>
+                            </p>
+                            <p class="card-text">
+                                <small class="text-muted">Detected on: April 17, 2025 10:30 AM</small>
+                            </p>
+                            <a href="#" class="btn btn-sm btn-primary">View Details</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-4">
+                    <div class="card detection-card">
+                        <img src="sample_data/detection_2.jpg" class="detection-image" alt="Detection">
+                        <div class="card-body">
+                            <h5 class="card-title">Person Detection</h5>
+                            <p class="card-text">
+                                <span class="badge bg-success">Confidence: 0.87</span>
+                                <span class="badge bg-info">Class: Person</span>
+                            </p>
+                            <p class="card-text">
+                                <small class="text-muted">Detected on: April 17, 2025 10:35 AM</small>
+                            </p>
+                            <a href="#" class="btn btn-sm btn-primary">View Details</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-4 mb-4">
+                    <div class="card detection-card">
+                        <img src="sample_data/detection_3.jpg" class="detection-image" alt="Detection">
+                        <div class="card-body">
+                            <h5 class="card-title">Equipment Detection</h5>
+                            <p class="card-text">
+                                <span class="badge bg-warning">Confidence: 0.76</span>
+                                <span class="badge bg-info">Class: Equipment</span>
+                            </p>
+                            <p class="card-text">
+                                <small class="text-muted">Detected on: April 17, 2025 10:40 AM</small>
+                            </p>
+                            <a href="#" class="btn btn-sm btn-primary">View Details</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-12">
+                    <nav>
+                        <ul class="pagination justify-content-center">
+                            <li class="page-item disabled">
+                                <a class="page-link" href="#" tabindex="-1">Previous</a>
+                            </li>
+                            <li class="page-item active"><a class="page-link" href="#">1</a></li>
+                            <li class="page-item"><a class="page-link" href="#">2</a></li>
+                            <li class="page-item"><a class="page-link" href="#">3</a></li>
+                            <li class="page-item">
+                                <a class="page-link" href="#">Next</a>
+                            </li>
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help Modal -->
+    <div class="modal fade" id="helpModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Help & Documentation</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <h4>Getting Started</h4>
+                    <p>Welcome to the MineralVision WALDO Integration platform. This system provides advanced object detection, tracking, and measurement capabilities for mineral exploration and mining operations.</p>
+                    
+                    <h5>Quick Start Guide</h5>
+                    <ol>
+                        <li>Upload your data (images or videos) using the Upload Data section</li>
+                        <li>Configure detection parameters</li>
+                        <li>Start processing</li>
+                        <li>View and analyze results in the Detections section</li>
+                    </ol>
+                    
+                    <h5>Key Features</h5>
+                    <ul>
+                        <li>Real-time object detection using WALDO models</li>
+                        <li>Multi-object tracking across video frames</li>
+                        <li>Measurement calculation based on camera parameters</li>
+                        <li>Integration with ArcGIS for spatial analysis</li>
+                        <li>Comprehensive data visualization and reporting</li>
+                    </ul>
+                    
+                    <h5>Need More Help?</h5>
+                    <p>For detailed documentation, please refer to the <a href="#" target="_blank">User Manual</a> or contact support at <a href="mailto:support@mineralvision.com">support@mineralvision.com</a>.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <a href="#" class="btn btn-primary">Open User Manual</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script>
+        // Initialize charts
+        document.addEventListener('DOMContentLoaded', function() {
+            // Trends chart
+            const trendsCtx = document.getElementById('trendsChart').getContext('2d');
+            const trendsChart = new Chart(trendsCtx, {
+                type: 'line',
+                data: {
+                    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul'],
+                    datasets: [{
+                        label: 'Detections',
+                        data: [65, 59, 80, 81, 56, 55, 40],
+                        fill: false,
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+
+            // Class chart
+            const classCtx = document.getElementById('classChart').getContext('2d');
+            const classChart = new Chart(classCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Vehicle', 'Person', 'Equipment', 'Building', 'Other'],
+                    datasets: [{
+                        data: [45, 25, 20, 10, 5],
+                        backgroundColor: [
+                            'rgba(255, 99, 132, 0.7)',
+                            'rgba(54, 162, 235, 0.7)',
+                            'rgba(255, 206, 86, 0.7)',
+                            'rgba(75, 192, 192, 0.7)',
+                            'rgba(153, 102, 255, 0.7)'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false
+                }
+            });
+
+            // Initialize map
+            const map = L.map('map').setView([37.7749, -122.4194], 13);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+
+            // Add sample markers
+            L.marker([37.7749, -122.4194]).addTo(map)
+                .bindPopup('Vehicle Detection<br>Confidence: 0.95');
+            L.marker([37.7700, -122.4100]).addTo(map)
+                .bindPopup('Person Detection<br>Confidence: 0.87');
+            L.marker([37.7800, -122.4300]).addTo(map)
+                .bindPopup('Equipment Detection<br>Confidence: 0.76');
+
+            // Navigation
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    
+                    // Update active link
+                    document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Show corresponding section
+                    const targetId = this.getAttribute('href').substring(1);
+                    document.querySelectorAll('.main-content > div').forEach(section => {
+                        section.classList.add('d-none');
+                    });
+                    document.getElementById(targetId).classList.remove('d-none');
+                });
+            });
+
+            // Confidence threshold slider
+            document.getElementById('confidenceThreshold').addEventListener('input', function() {
+                document.getElementById('confidenceValue').textContent = this.value;
+            });
+
+            // Confidence filter slider
+            document.getElementById('confidenceFilter').addEventListener('input', function() {
+                document.getElementById('confidenceFilterValue').textContent = this.value;
+            });
+
+            // Class selection toggle
+            document.getElementById('classAll').addEventListener('change', function() {
+                const classOptions = document.getElementById('classOptions');
+                if (this.checked) {
+                    classOptions.classList.add('d-none');
+                } else {
+                    classOptions.classList.remove('d-none');
+                }
+            });
+
+            // File upload handling
+            const dropArea = document.getElementById('dropArea');
+            const fileInput = document.getElementById('fileInput');
+            const uploadProgress = document.getElementById('uploadProgress');
+            const uploadedFiles = document.getElementById('uploadedFiles');
+            const startProcessingBtn = document.getElementById('startProcessingBtn');
+
+            dropArea.addEventListener('click', () => fileInput.click());
+            
+            dropArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropArea.classList.add('border-primary');
+            });
+            
+            dropArea.addEventListener('dragleave', () => {
+                dropArea.classList.remove('border-primary');
+            });
+            
+            dropArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropArea.classList.remove('border-primary');
+                handleFiles(e.dataTransfer.files);
+            });
+            
+            fileInput.addEventListener('change', () => {
+                handleFiles(fileInput.files);
+            });
+            
+            function handleFiles(files) {
+                if (files.length === 0) return;
+                
+                uploadProgress.classList.remove('d-none');
+                uploadedFiles.innerHTML = '';
+                
+                // Simulate upload progress
+                let progress = 0;
+                const interval = setInterval(() => {
+                    progress += 5;
+                    uploadProgress.querySelector('.progress-bar').style.width = `${progress}%`;
+                    uploadProgress.querySelector('.progress-bar').setAttribute('aria-valuenow', progress);
+                    
+                    if (progress >= 100) {
+                        clearInterval(interval);
+                        displayUploadedFiles(files);
+                        startProcessingBtn.disabled = false;
+                    }
+                }, 100);
+            }
+            
+            function displayUploadedFiles(files) {
+                uploadedFiles.innerHTML = '<h6 class="mt-3">Uploaded Files:</h6>';
+                const list = document.createElement('ul');
+                list.className = 'list-group';
+                
+                for (const file of files) {
+                    const item = document.createElement('li');
+                    item.className = 'list-group-item d-flex justify-content-between align-items-center';
+                    item.innerHTML = `
+                        <span>${file.name}</span>
+                        <span class="badge bg-success rounded-pill">Ready</span>
+                    `;
+                    list.appendChild(item);
+                }
+                
+                uploadedFiles.appendChild(list);
+            }
+        });
+    </script>
+</body>
+</html>

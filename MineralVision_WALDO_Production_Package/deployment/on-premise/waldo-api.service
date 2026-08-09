@@ -1,0 +1,17 @@
+[Unit]
+Description=MineralVision WALDO API Service
+After=network.target postgresql.service rabbitmq-server.service waldo-detection.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mineralvision/waldo
+ExecStart=/usr/bin/python3 -m api.server
+Environment="DATABASE_URI=postgresql://mineralvision:password@localhost:5432/waldo_detections"
+Environment="RABBITMQ_URI=amqp://guest:guest@localhost:5672/"
+Environment="WALDO_SERVICE_URL=http://localhost:8000"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

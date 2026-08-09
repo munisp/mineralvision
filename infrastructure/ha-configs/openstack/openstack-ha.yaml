@@ -1,0 +1,433 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openstack-heat-template
+  namespace: mineralvision
+data:
+  mineralvision-stack.yaml: |
+    heat_template_version: 2021-04-16
+    description: MineralVision HA Infrastructure on OpenStack
+    
+    parameters:
+      key_name:
+        type: string
+        description: SSH key pair name
+        default: mineralvision-key
+      
+      image:
+        type: string
+        description: Base image for instances
+        default: ubuntu-22.04
+      
+      external_network:
+        type: string
+        description: External network for floating IPs
+        default: external
+      
+      dns_nameservers:
+        type: comma_delimited_list
+        description: DNS servers
+        default: "8.8.8.8,8.8.4.4"
+      
+      availability_zones:
+        type: comma_delimited_list
+        description: Availability zones for HA
+        default: "az1,az2,az3"
+    
+    resources:
+      mineralvision_network:
+        type: OS::Neutron::Net
+        properties:
+          name: mineralvision-network
+          admin_state_up: true
+      
+      mineralvision_subnet:
+        type: OS::Neutron::Subnet
+        properties:
+          name: mineralvision-subnet
+          network: { get_resource: mineralvision_network }
+          cidr: 10.100.0.0/16
+          gateway_ip: 10.100.0.1
+          dns_nameservers: { get_param: dns_nameservers }
+          allocation_pools:
+            - start: 10.100.1.0
+              end: 10.100.254.254
+          ip_version: 4
+      
+      mineralvision_router:
+        type: OS::Neutron::Router
+        properties:
+          name: mineralvision-router
+          external_gateway_info:
+            network: { get_param: external_network }
+      
+      mineralvision_router_interface:
+        type: OS::Neutron::RouterInterface
+        properties:
+          router: { get_resource: mineralvision_router }
+          subnet: { get_resource: mineralvision_subnet }
+      
+      k8s_security_group:
+        type: OS::Neutron::SecurityGroup
+        properties:
+          name: mineralvision-k8s-sg
+          rules:
+            - direction: ingress
+              protocol: tcp
+              port_range_min: 22
+              port_range_max: 22
+              remote_ip_prefix: 0.0.0.0/0
+            - direction: ingress
+              protocol: tcp
+              port_range_min: 6443
+              port_range_max: 6443
+              remote_ip_prefix: 0.0.0.0/0
+            - direction: ingress
+              protocol: tcp
+              port_range_min: 80
+              port_range_max: 80
+              remote_ip_prefix: 0.0.0.0/0
+            - direction: ingress
+              protocol: tcp
+              port_range_min: 443
+              port_range_max: 443
+              remote_ip_prefix: 0.0.0.0/0
+            - direction: ingress
+              protocol: tcp
+              port_range_min: 30000
+              port_range_max: 32767
+              remote_ip_prefix: 0.0.0.0/0
+            - direction: ingress
+              protocol: icmp
+              remote_ip_prefix: 0.0.0.0/0
+            - direction: ingress
+              remote_mode: remote_group_id
+            - direction: egress
+              remote_ip_prefix: 0.0.0.0/0
+      
+      k8s_master_port_1:
+        type: OS::Neutron::Port
+        properties:
+          network: { get_resource: mineralvision_network }
+          security_groups:
+            - { get_resource: k8s_security_group }
+          fixed_ips:
+            - subnet: { get_resource: mineralvision_subnet }
+      
+      k8s_master_port_2:
+        type: OS::Neutron::Port
+        properties:
+          network: { get_resource: mineralvision_network }
+          security_groups:
+            - { get_resource: k8s_security_group }
+          fixed_ips:
+            - subnet: { get_resource: mineralvision_subnet }
+      
+      k8s_master_port_3:
+        type: OS::Neutron::Port
+        properties:
+          network: { get_resource: mineralvision_network }
+          security_groups:
+            - { get_resource: k8s_security_group }
+          fixed_ips:
+            - subnet: { get_resource: mineralvision_subnet }
+      
+      k8s_master_1:
+        type: OS::Nova::Server
+        properties:
+          name: mineralvision-k8s-master-1
+          flavor: m1.xlarge
+          image: { get_param: image }
+          key_name: { get_param: key_name }
+          availability_zone: { get_param: [ availability_zones, 0 ] }
+          networks:
+            - port: { get_resource: k8s_master_port_1 }
+          user_data_format: RAW
+          user_data:
+            str_replace:
+              template: |
+                #!/bin/bash
+                set -e
+                apt-get update
+                apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+                curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+                echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list
+                apt-get update
+                apt-get install -y containerd.io
+                mkdir -p /etc/containerd
+                containerd config default | tee /etc/containerd/config.toml
+                sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+                systemctl restart containerd
+                systemctl enable containerd
+                curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.29/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+                echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.29/deb/ /' | tee /etc/apt/sources.list.d/kubernetes.list
+                apt-get update
+                apt-get install -y kubelet kubeadm kubectl
+                apt-mark hold kubelet kubeadm kubectl
+                swapoff -a
+                sed -i '/ swap / s/^/#/' /etc/fstab
+                cat <<EOF | tee /etc/modules-load.d/k8s.conf
+                overlay
+                br_netfilter
+                EOF
+                modprobe overlay
+                modprobe br_netfilter
+                cat <<EOF | tee /etc/sysctl.d/k8s.conf
+                net.bridge.bridge-nf-call-iptables  = 1
+                net.bridge.bridge-nf-call-ip6tables = 1
+                net.ipv4.ip_forward                 = 1
+                EOF
+                sysctl --system
+              params:
+                $PLACEHOLDER: placeholder
+      
+      k8s_master_2:
+        type: OS::Nova::Server
+        properties:
+          name: mineralvision-k8s-master-2
+          flavor: m1.xlarge
+          image: { get_param: image }
+          key_name: { get_param: key_name }
+          availability_zone: { get_param: [ availability_zones, 1 ] }
+          networks:
+            - port: { get_resource: k8s_master_port_2 }
+          user_data_format: RAW
+          user_data:
+            str_replace:
+              template: |
+                #!/bin/bash
+                set -e
+                apt-get update
+                apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release containerd.io kubelet kubeadm kubectl
+                apt-mark hold kubelet kubeadm kubectl
+                swapoff -a
+              params:
+                $PLACEHOLDER: placeholder
+      
+      k8s_master_3:
+        type: OS::Nova::Server
+        properties:
+          name: mineralvision-k8s-master-3
+          flavor: m1.xlarge
+          image: { get_param: image }
+          key_name: { get_param: key_name }
+          availability_zone: { get_param: [ availability_zones, 2 ] }
+          networks:
+            - port: { get_resource: k8s_master_port_3 }
+          user_data_format: RAW
+          user_data:
+            str_replace:
+              template: |
+                #!/bin/bash
+                set -e
+                apt-get update
+                apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release containerd.io kubelet kubeadm kubectl
+                apt-mark hold kubelet kubeadm kubectl
+                swapoff -a
+              params:
+                $PLACEHOLDER: placeholder
+      
+      k8s_worker_group:
+        type: OS::Heat::ResourceGroup
+        properties:
+          count: 6
+          resource_def:
+            type: OS::Nova::Server
+            properties:
+              name: mineralvision-k8s-worker-%index%
+              flavor: m1.2xlarge
+              image: { get_param: image }
+              key_name: { get_param: key_name }
+              availability_zone: { get_param: [ availability_zones, { get_attr: [ random_az, value ] } ] }
+              networks:
+                - network: { get_resource: mineralvision_network }
+              security_groups:
+                - { get_resource: k8s_security_group }
+              user_data_format: RAW
+              user_data: |
+                #!/bin/bash
+                set -e
+                apt-get update
+                apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release containerd.io kubelet kubeadm kubectl
+                apt-mark hold kubelet kubeadm kubectl
+                swapoff -a
+      
+      random_az:
+        type: OS::Heat::RandomString
+        properties:
+          length: 1
+          sequence: custom
+          character_classes:
+            - class: "012"
+      
+      k8s_api_lb:
+        type: OS::Octavia::LoadBalancer
+        properties:
+          name: mineralvision-k8s-api-lb
+          vip_subnet: { get_resource: mineralvision_subnet }
+      
+      k8s_api_listener:
+        type: OS::Octavia::Listener
+        properties:
+          name: mineralvision-k8s-api-listener
+          loadbalancer: { get_resource: k8s_api_lb }
+          protocol: TCP
+          protocol_port: 6443
+      
+      k8s_api_pool:
+        type: OS::Octavia::Pool
+        properties:
+          name: mineralvision-k8s-api-pool
+          listener: { get_resource: k8s_api_listener }
+          lb_algorithm: ROUND_ROBIN
+          protocol: TCP
+      
+      k8s_api_member_1:
+        type: OS::Octavia::PoolMember
+        properties:
+          pool: { get_resource: k8s_api_pool }
+          address: { get_attr: [ k8s_master_1, first_address ] }
+          protocol_port: 6443
+          subnet: { get_resource: mineralvision_subnet }
+      
+      k8s_api_member_2:
+        type: OS::Octavia::PoolMember
+        properties:
+          pool: { get_resource: k8s_api_pool }
+          address: { get_attr: [ k8s_master_2, first_address ] }
+          protocol_port: 6443
+          subnet: { get_resource: mineralvision_subnet }
+      
+      k8s_api_member_3:
+        type: OS::Octavia::PoolMember
+        properties:
+          pool: { get_resource: k8s_api_pool }
+          address: { get_attr: [ k8s_master_3, first_address ] }
+          protocol_port: 6443
+          subnet: { get_resource: mineralvision_subnet }
+      
+      k8s_api_healthmonitor:
+        type: OS::Octavia::HealthMonitor
+        properties:
+          pool: { get_resource: k8s_api_pool }
+          type: TCP
+          delay: 5
+          timeout: 5
+          max_retries: 3
+      
+      k8s_api_floating_ip:
+        type: OS::Neutron::FloatingIP
+        properties:
+          floating_network: { get_param: external_network }
+      
+      k8s_api_floating_ip_association:
+        type: OS::Neutron::FloatingIPAssociation
+        properties:
+          floatingip_id: { get_resource: k8s_api_floating_ip }
+          port_id: { get_attr: [ k8s_api_lb, vip_port_id ] }
+      
+      cinder_volume_etcd_1:
+        type: OS::Cinder::Volume
+        properties:
+          name: mineralvision-etcd-1
+          size: 100
+          volume_type: ssd
+          availability_zone: { get_param: [ availability_zones, 0 ] }
+      
+      cinder_volume_etcd_2:
+        type: OS::Cinder::Volume
+        properties:
+          name: mineralvision-etcd-2
+          size: 100
+          volume_type: ssd
+          availability_zone: { get_param: [ availability_zones, 1 ] }
+      
+      cinder_volume_etcd_3:
+        type: OS::Cinder::Volume
+        properties:
+          name: mineralvision-etcd-3
+          size: 100
+          volume_type: ssd
+          availability_zone: { get_param: [ availability_zones, 2 ] }
+      
+      etcd_volume_attachment_1:
+        type: OS::Cinder::VolumeAttachment
+        properties:
+          volume_id: { get_resource: cinder_volume_etcd_1 }
+          instance_uuid: { get_resource: k8s_master_1 }
+          mountpoint: /dev/vdb
+      
+      etcd_volume_attachment_2:
+        type: OS::Cinder::VolumeAttachment
+        properties:
+          volume_id: { get_resource: cinder_volume_etcd_2 }
+          instance_uuid: { get_resource: k8s_master_2 }
+          mountpoint: /dev/vdb
+      
+      etcd_volume_attachment_3:
+        type: OS::Cinder::VolumeAttachment
+        properties:
+          volume_id: { get_resource: cinder_volume_etcd_3 }
+          instance_uuid: { get_resource: k8s_master_3 }
+          mountpoint: /dev/vdb
+    
+    outputs:
+      k8s_api_endpoint:
+        description: Kubernetes API endpoint
+        value:
+          str_replace:
+            template: https://FLOATING_IP:6443
+            params:
+              FLOATING_IP: { get_attr: [ k8s_api_floating_ip, floating_ip_address ] }
+      
+      master_ips:
+        description: Master node IPs
+        value:
+          - { get_attr: [ k8s_master_1, first_address ] }
+          - { get_attr: [ k8s_master_2, first_address ] }
+          - { get_attr: [ k8s_master_3, first_address ] }
+      
+      network_id:
+        description: Network ID
+        value: { get_resource: mineralvision_network }
+      
+      subnet_id:
+        description: Subnet ID
+        value: { get_resource: mineralvision_subnet }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openstack-cloud-config
+  namespace: mineralvision
+data:
+  cloud.conf: |
+    [Global]
+    auth-url=https://openstack.mineralvision.local:5000/v3
+    username=mineralvision
+    password=${OPENSTACK_PASSWORD}
+    tenant-name=mineralvision
+    domain-name=Default
+    region=RegionOne
+    
+    [LoadBalancer]
+    lb-version=v2
+    subnet-id=${SUBNET_ID}
+    floating-network-id=${EXTERNAL_NETWORK_ID}
+    lb-method=ROUND_ROBIN
+    lb-provider=octavia
+    create-monitor=true
+    monitor-delay=5s
+    monitor-timeout=5s
+    monitor-max-retries=3
+    
+    [BlockStorage]
+    bs-version=v3
+    ignore-volume-az=false
+    
+    [Networking]
+    public-network-name=external
+    internal-network-name=mineralvision-network
+    
+    [Metadata]
+    search-order=configDrive,metadataService

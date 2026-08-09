@@ -1,0 +1,19 @@
+[Unit]
+Description=MineralVision WALDO Edge Detection Service
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mineralvision/waldo
+ExecStart=/usr/bin/python3 -m waldo_integration.edge_server
+Environment="MODEL_PATH=/var/lib/mineralvision/waldo/models/waldo_edge.onnx"
+Environment="DATABASE_PATH=/var/lib/mineralvision/waldo/database/waldo.db"
+Environment="DATA_DIR=/var/lib/mineralvision/waldo/data"
+Environment="LOG_DIR=/var/log/mineralvision/waldo"
+Environment="MODEL_PRECISION=int8"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

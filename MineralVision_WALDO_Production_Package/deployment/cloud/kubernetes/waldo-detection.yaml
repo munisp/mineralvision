@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: waldo-detection
+  labels:
+    app: waldo-detection
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: waldo-detection
+  template:
+    metadata:
+      labels:
+        app: waldo-detection
+    spec:
+      containers:
+      - name: waldo-detection
+        image: mineralvision/waldo-detection:latest
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+        env:
+        - name: CUDA_VISIBLE_DEVICES
+          value: "0"
+        - name: MODEL_PRECISION
+          value: "fp16"
+        - name: BATCH_SIZE
+          value: "4"
+        - name: DATABASE_URI
+          valueFrom:
+            secretKeyRef:
+              name: waldo-secrets
+              key: database-uri
+        - name: RABBITMQ_URI
+          valueFrom:
+            secretKeyRef:
+              name: waldo-secrets
+              key: rabbitmq-uri
+        ports:
+        - containerPort: 8000
+        volumeMounts:
+        - name: waldo-models
+          mountPath: /app/models
+        - name: waldo-data
+          mountPath: /app/data
+      volumes:
+      - name: waldo-models
+        persistentVolumeClaim:
+          claimName: waldo-models-pvc
+      - name: waldo-data
+        persistentVolumeClaim:
+          claimName: waldo-data-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: waldo-detection
+spec:
+  selector:
+    app: waldo-detection
+  ports:
+  - port: 8000
+    targetPort: 8000
+  type: ClusterIP

@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  # WALDO Detection Service
+  waldo-detection:
+    image: mineralvision/waldo-detection:latest
+    build:
+      context: ../../
+      dockerfile: deployment/cloud/Dockerfile
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - MODEL_PRECISION=fp16
+      - BATCH_SIZE=4
+      - DATABASE_URI=postgresql://mineralvision:${DB_PASSWORD}@database:5432/waldo_detections
+      - RABBITMQ_URI=amqp://mineralvision:${RABBITMQ_PASSWORD}@message-broker:5672/
+    volumes:
+      - waldo-models:/app/models
+      - waldo-data:/app/data
+    ports:
+      - "8000:8000"
+    depends_on:
+      - database
+      - message-broker
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # API Service
+  api-service:
+    image: mineralvision/waldo-api:latest
+    build:
+      context: ../../
+      dockerfile: deployment/cloud/Dockerfile.api
+    environment:
+      - DATABASE_URI=postgresql://mineralvision:${DB_PASSWORD}@database:5432/waldo_detections
+      - RABBITMQ_URI=amqp://mineralvision:${RABBITMQ_PASSWORD}@message-broker:5672/
+      - WALDO_SERVICE_URL=http://waldo-detection:8000
+    ports:
+      - "8080:8080"
+    depends_on:
+      - waldo-detection
+      - database
+      - message-broker
+
+  # Web UI
+  web-ui:
+    image: mineralvision/waldo-ui:latest
+    build:
+      context: ../../
+      dockerfile: deployment/cloud/Dockerfile.ui
+    ports:
+      - "80:80"
+    environment:
+      - API_URL=http://api-service:8080
+    depends_on:
+      - api-service
+
+  # Database
+  database:
+    image: postgres:14
+    environment:
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_USER=mineralvision
+      - POSTGRES_DB=waldo_detections
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  # Message Broker
+  message-broker:
+    image: rabbitmq:3-management
+    environment:
+      - RABBITMQ_DEFAULT_USER=mineralvision
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+
+  # ArcGIS Integration Service
+  arcgis-integration:
+    image: mineralvision/arcgis-integration:latest
+    build:
+      context: ../../
+      dockerfile: deployment/cloud/Dockerfile.arcgis
+    environment:
+      - DATABASE_URI=postgresql://mineralvision:${DB_PASSWORD}@database:5432/waldo_detections
+      - ARCGIS_URL=${ARCGIS_URL}
+      - ARCGIS_USERNAME=${ARCGIS_USERNAME}
+      - ARCGIS_PASSWORD=${ARCGIS_PASSWORD}
+    depends_on:
+      - database
+    restart: unless-stopped
+
+volumes:
+  waldo-models:
+  waldo-data:
+  postgres-data:
+  rabbitmq-data:

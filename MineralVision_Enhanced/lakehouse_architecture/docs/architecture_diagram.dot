@@ -1,0 +1,87 @@
+digraph G {
+    rankdir=LR;
+    node [shape=box, style=filled, fillcolor=lightblue, fontname="Arial", fontsize=12];
+    edge [fontname="Arial", fontsize=10];
+    
+    subgraph cluster_lakehouse {
+        label="MineralVision Lakehouse Architecture";
+        style=filled;
+        fillcolor=aliceblue;
+        
+        subgraph cluster_storage {
+            label="Data Storage Layer";
+            style=filled;
+            fillcolor=lightcyan;
+            
+            delta [label="Delta Lake Storage\n(ACID, Time Travel)"];
+            parquet [label="Parquet Storage\n(Columnar, Predicate Pushdown)"];
+        }
+        
+        subgraph cluster_processing {
+            label="Processing Framework";
+            style=filled;
+            fillcolor=lightcyan;
+            
+            spark [label="Apache Spark\n(SQL, ML, Batch)"];
+            ray [label="Ray\n(Distributed Python, ML)"];
+        }
+        
+        subgraph cluster_query {
+            label="Query Engine";
+            style=filled;
+            fillcolor=lightcyan;
+            
+            datafusion [label="Apache DataFusion\n(High-Performance SQL)"];
+        }
+        
+        subgraph cluster_geospatial {
+            label="Geospatial Analytics";
+            style=filled;
+            fillcolor=lightcyan;
+            
+            geospatial [label="Geospatial Integration\n(Mineral Exploration Analytics)"];
+        }
+    }
+    
+    subgraph cluster_data_sources {
+        label="Data Sources";
+        style=filled;
+        fillcolor=lavender;
+        
+        satellite [label="Satellite Imagery"];
+        lidar [label="LiDAR Data"];
+        geophysical [label="Geophysical Surveys"];
+        field [label="Field Samples"];
+    }
+    
+    subgraph cluster_outputs {
+        label="Outputs";
+        style=filled;
+        fillcolor=lavender;
+        
+        mineral_maps [label="Mineral Maps"];
+        exploration_targets [label="Exploration Targets"];
+        reports [label="Reports"];
+        gis [label="GIS Integration"];
+    }
+    
+    // Data flow
+    satellite -> delta;
+    lidar -> delta;
+    geophysical -> delta;
+    field -> delta;
+    
+    delta -> spark;
+    parquet -> spark;
+    delta -> datafusion;
+    parquet -> datafusion;
+    
+    spark -> geospatial;
+    ray -> geospatial;
+    datafusion -> geospatial;
+    
+    geospatial -> mineral_maps;
+    geospatial -> exploration_targets;
+    geospatial -> reports;
+    geospatial -> gis;
+}

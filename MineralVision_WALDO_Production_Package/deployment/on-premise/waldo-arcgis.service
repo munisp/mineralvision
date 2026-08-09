@@ -1,0 +1,18 @@
+[Unit]
+Description=MineralVision WALDO ArcGIS Integration Service
+After=network.target postgresql.service waldo-detection.service
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/mineralvision/waldo
+ExecStart=/usr/bin/python3 -m arcgis_integration.server
+Environment="DATABASE_URI=postgresql://mineralvision:password@localhost:5432/waldo_detections"
+Environment="ARCGIS_URL=https://arcgis.example.com"
+Environment="ARCGIS_USERNAME=mineralvision"
+Environment="ARCGIS_PASSWORD=password"
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

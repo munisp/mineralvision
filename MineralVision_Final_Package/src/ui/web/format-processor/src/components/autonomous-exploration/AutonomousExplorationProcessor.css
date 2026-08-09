@@ -1,0 +1,163 @@
+.autonomous-exploration-processor {
+  padding: 20px;
+}
+
+.page-title {
+  color: #2c3e50;
+  margin-bottom: 10px;
+}
+
+.page-description {
+  color: #7f8c8d;
+  font-size: 1.1rem;
+  margin-bottom: 20px;
+}
+
+.tab-content {
+  padding: 20px 0;
+}
+
+/* Drone card styling */
+.drone-card {
+  transition: all 0.3s ease;
+  height: 100%;
+}
+
+.drone-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+.drone-card .card-header {
+  background-color: #f8f9fa;
+  font-weight: bold;
+}
+
+/* Battery status colors */
+.battery-high {
+  color: #28a745;
+  font-weight: bold;
+}
+
+.battery-medium {
+  color: #ffc107;
+  font-weight: bold;
+}
+
+.battery-low {
+  color: #dc3545;
+  font-weight: bold;
+}
+
+/* Map markers */
+.drone-marker {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background-color: #6c757d;
+  border: 2px solid white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 14px;
+}
+
+.drone-marker.idle {
+  background-color: #6c757d;
+}
+
+.drone-marker.mission, .drone-marker.in_progress {
+  background-color: #007bff;
+}
+
+.drone-marker.returning {
+  background-color: #17a2b8;
+}
+
+.drone-marker.charging {
+  background-color: #ffc107;
+}
+
+.drone-marker.error {
+  background-color: #dc3545;
+}
+
+.sampling-point-marker {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid white;
+}
+
+.sampling-point-marker.pending {
+  background-color: #6c757d;
+}
+
+.sampling-point-marker.assigned {
+  background-color: #007bff;
+}
+
+.sampling-point-marker.completed {
+  background-color: #28a745;
+}
+
+.sampling-point-marker[data-priority="10"],
+.sampling-point-marker[data-priority="9"],
+.sampling-point-marker[data-priority="8"] {
+  background-color: #dc3545;
+}
+
+.sampling-point-marker[data-priority="7"],
+.sampling-point-marker[data-priority="6"],
+.sampling-point-marker[data-priority="5"] {
+  background-color: #ffc107;
+}
+
+/* Map legend */
+.map-legend {
+  background-color: rgba(255, 255, 255, 0.9);
+  padding: 10px;
+  border-radius: 5px;
+  border: 1px solid #dee2e6;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  margin-right: 20px;
+  margin-bottom: 10px;
+}
+
+.legend-item span {
+  margin-left: 5px;
+}
+
+.area-marker {
+  width: 20px;
+  height: 10px;
+  border: 1px solid #333;
+}
+
+.area-marker.pending {
+  background-color: rgba(108, 117, 125, 0.2);
+}
+
+.area-marker.in-progress {
+  background-color: rgba(0, 102, 204, 0.2);
+}
+
+.area-marker.completed {
+  background-color: rgba(40, 167, 69, 0.2);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .drone-card {
+    margin-bottom: 15px;
+  }
+  
+  .map-container {
+    height: 400px;
+  }
+}

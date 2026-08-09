@@ -1,0 +1,325 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-config
+  namespace: vault
+data:
+  vault.hcl: |
+    ui = true
+    
+    listener "tcp" {
+      address = "[::]:8200"
+      cluster_address = "[::]:8201"
+      tls_disable = false
+      tls_cert_file = "/vault/tls/tls.crt"
+      tls_key_file = "/vault/tls/tls.key"
+    }
+    
+    storage "raft" {
+      path = "/vault/data"
+      node_id = "HOSTNAME"
+      
+      retry_join {
+        leader_api_addr = "https://vault-0.vault-headless.vault.svc.cluster.local:8200"
+        leader_ca_cert_file = "/vault/tls/ca.crt"
+      }
+      retry_join {
+        leader_api_addr = "https://vault-1.vault-headless.vault.svc.cluster.local:8200"
+        leader_ca_cert_file = "/vault/tls/ca.crt"
+      }
+      retry_join {
+        leader_api_addr = "https://vault-2.vault-headless.vault.svc.cluster.local:8200"
+        leader_ca_cert_file = "/vault/tls/ca.crt"
+      }
+    }
+    
+    seal "awskms" {
+      region     = "us-west-2"
+      kms_key_id = "alias/mineralvision-vault-unseal"
+    }
+    
+    telemetry {
+      prometheus_retention_time = "30s"
+      disable_hostname = true
+    }
+    
+    api_addr = "https://HOSTNAME.vault-headless.vault.svc.cluster.local:8200"
+    cluster_addr = "https://HOSTNAME.vault-headless.vault.svc.cluster.local:8201"
+    
+    service_registration "kubernetes" {}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vault
+  namespace: vault
+spec:
+  serviceName: vault-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: vault
+  template:
+    metadata:
+      labels:
+        app: vault
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - vault
+              topologyKey: kubernetes.io/hostname
+      serviceAccountName: vault
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.15.0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              sed "s/HOSTNAME/$HOSTNAME/g" /vault/config/vault.hcl > /tmp/vault.hcl
+              vault server -config=/tmp/vault.hcl
+          env:
+            - name: VAULT_ADDR
+              value: "https://127.0.0.1:8200"
+            - name: VAULT_API_ADDR
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SKIP_CHOWN
+              value: "true"
+            - name: SKIP_SETCAP
+              value: "true"
+            - name: AWS_REGION
+              value: "us-west-2"
+          ports:
+            - containerPort: 8200
+              name: https
+            - containerPort: 8201
+              name: cluster
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          securityContext:
+            capabilities:
+              add:
+                - IPC_LOCK
+          volumeMounts:
+            - name: vault-data
+              mountPath: /vault/data
+            - name: vault-config
+              mountPath: /vault/config
+            - name: vault-tls
+              mountPath: /vault/tls
+          livenessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true
+              port: 8200
+              scheme: HTTPS
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /v1/sys/health?standbyok=true&sealedcode=204&uninitcode=204
+              port: 8200
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 5
+      volumes:
+        - name: vault-config
+          configMap:
+            name: vault-config
+        - name: vault-tls
+          secret:
+            secretName: vault-tls
+  volumeClaimTemplates:
+    - metadata:
+        name: vault-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault-headless
+  namespace: vault
+spec:
+  clusterIP: None
+  selector:
+    app: vault
+  ports:
+    - name: https
+      port: 8200
+      targetPort: 8200
+    - name: cluster
+      port: 8201
+      targetPort: 8201
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vault
+  namespace: vault
+spec:
+  selector:
+    app: vault
+  ports:
+    - name: https
+      port: 8200
+      targetPort: 8200
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault
+  namespace: vault
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: vault
+    namespace: vault
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vault-pdb
+  namespace: vault
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: vault
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-policies
+  namespace: vault
+data:
+  mineralvision-policy.hcl: |
+    # MineralVision application secrets
+    path "secret/data/mineralvision/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+    
+    path "secret/metadata/mineralvision/*" {
+      capabilities = ["list"]
+    }
+    
+    # Database credentials
+    path "database/creds/mineralvision-*" {
+      capabilities = ["read"]
+    }
+    
+    # PKI certificates
+    path "pki/issue/mineralvision" {
+      capabilities = ["create", "update"]
+    }
+    
+    # Transit encryption
+    path "transit/encrypt/mineralvision" {
+      capabilities = ["update"]
+    }
+    
+    path "transit/decrypt/mineralvision" {
+      capabilities = ["update"]
+    }
+  
+  kafka-policy.hcl: |
+    path "secret/data/kafka/*" {
+      capabilities = ["read"]
+    }
+  
+  redis-policy.hcl: |
+    path "secret/data/redis/*" {
+      capabilities = ["read"]
+    }
+  
+  keycloak-policy.hcl: |
+    path "secret/data/keycloak/*" {
+      capabilities = ["read"]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-init-script
+  namespace: vault
+data:
+  init.sh: |
+    #!/bin/bash
+    set -e
+    
+    # Wait for Vault to be ready
+    until vault status 2>/dev/null; do
+      echo "Waiting for Vault..."
+      sleep 5
+    done
+    
+    # Enable secrets engines
+    vault secrets enable -path=secret kv-v2 || true
+    vault secrets enable database || true
+    vault secrets enable pki || true
+    vault secrets enable transit || true
+    
+    # Configure PKI
+    vault write pki/root/generate/internal \
+      common_name="MineralVision Root CA" \
+      ttl=87600h || true
+    
+    vault write pki/roles/mineralvision \
+      allowed_domains="mineralvision.local,mineralvision.svc.cluster.local" \
+      allow_subdomains=true \
+      max_ttl=72h || true
+    
+    # Configure Transit encryption key
+    vault write -f transit/keys/mineralvision || true
+    
+    # Enable Kubernetes auth
+    vault auth enable kubernetes || true
+    
+    vault write auth/kubernetes/config \
+      kubernetes_host="https://$KUBERNETES_PORT_443_TCP_ADDR:443" \
+      token_reviewer_jwt="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
+      kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt || true
+    
+    # Create policies
+    vault policy write mineralvision /vault/policies/mineralvision-policy.hcl || true
+    vault policy write kafka /vault/policies/kafka-policy.hcl || true
+    vault policy write redis /vault/policies/redis-policy.hcl || true
+    vault policy write keycloak /vault/policies/keycloak-policy.hcl || true
+    
+    # Create Kubernetes auth roles
+    vault write auth/kubernetes/role/mineralvision \
+      bound_service_account_names=mineralvision \
+      bound_service_account_namespaces=mineralvision \
+      policies=mineralvision \
+      ttl=1h || true
+    
+    echo "Vault initialization complete!"

@@ -1,0 +1,507 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lakehouse
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spark-config
+  namespace: lakehouse
+data:
+  spark-defaults.conf: |
+    spark.master                                   k8s://https://kubernetes.default.svc
+    spark.kubernetes.container.image               apache/spark:3.5.0
+    spark.kubernetes.namespace                     lakehouse
+    spark.kubernetes.authenticate.driver.serviceAccountName spark
+    spark.kubernetes.driver.pod.name               spark-driver
+    spark.kubernetes.executor.request.cores        1
+    spark.kubernetes.executor.limit.cores          2
+    spark.executor.instances                       3
+    spark.executor.memory                          4g
+    spark.executor.cores                           2
+    spark.driver.memory                            2g
+    spark.driver.cores                             1
+    spark.sql.extensions                           io.delta.sql.DeltaSparkSessionExtension
+    spark.sql.catalog.spark_catalog                org.apache.spark.sql.delta.catalog.DeltaCatalog
+    spark.databricks.delta.retentionDurationCheck.enabled false
+    spark.sql.warehouse.dir                        s3a://mineralvision-lakehouse/warehouse
+    spark.hadoop.fs.s3a.endpoint                   http://minio.lakehouse.svc.cluster.local:9000
+    spark.hadoop.fs.s3a.access.key                 ${AWS_ACCESS_KEY_ID}
+    spark.hadoop.fs.s3a.secret.key                 ${AWS_SECRET_ACCESS_KEY}
+    spark.hadoop.fs.s3a.path.style.access          true
+    spark.hadoop.fs.s3a.impl                       org.apache.hadoop.fs.s3a.S3AFileSystem
+    spark.eventLog.enabled                         true
+    spark.eventLog.dir                             s3a://mineralvision-lakehouse/spark-events
+    spark.history.fs.logDirectory                  s3a://mineralvision-lakehouse/spark-events
+    spark.ui.prometheus.enabled                    true
+    spark.metrics.conf.*.sink.prometheusServlet.class org.apache.spark.metrics.sink.PrometheusServlet
+    spark.metrics.conf.*.sink.prometheusServlet.path /metrics/prometheus
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: delta-config
+  namespace: lakehouse
+data:
+  delta-defaults.conf: |
+    delta.logRetentionDuration=interval 30 days
+    delta.deletedFileRetentionDuration=interval 7 days
+    delta.enableChangeDataFeed=true
+    delta.autoOptimize.optimizeWrite=true
+    delta.autoOptimize.autoCompact=true
+    delta.checkpoint.writeStatsAsJson=true
+    delta.checkpoint.writeStatsAsStruct=true
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: lakehouse
+spec:
+  serviceName: minio-headless
+  replicas: 4
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - minio
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2024-01-01T16-36-33Z
+          args:
+            - server
+            - http://minio-{0...3}.minio-headless.lakehouse.svc.cluster.local/data
+            - --console-address
+            - ":9001"
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secrets
+                  key: root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secrets
+                  key: root-password
+            - name: MINIO_PROMETHEUS_AUTH_TYPE
+              value: public
+          ports:
+            - containerPort: 9000
+              name: api
+            - containerPort: 9001
+              name: console
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "1"
+          livenessProbe:
+            httpGet:
+              path: /minio/health/live
+              port: 9000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: 9000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: fast-ssd
+        resources:
+          requests:
+            storage: 500Gi
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: minio-secrets
+  namespace: lakehouse
+type: Opaque
+stringData:
+  root-user: mineralvision
+  root-password: mineralvision_minio_password_change_me
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-headless
+  namespace: lakehouse
+spec:
+  clusterIP: None
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: lakehouse
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: api
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-history-server
+  namespace: lakehouse
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: spark-history-server
+  template:
+    metadata:
+      labels:
+        app: spark-history-server
+    spec:
+      serviceAccountName: spark
+      containers:
+        - name: spark-history-server
+          image: apache/spark:3.5.0
+          command:
+            - /opt/spark/sbin/start-history-server.sh
+          env:
+            - name: SPARK_HISTORY_OPTS
+              value: >-
+                -Dspark.history.fs.logDirectory=s3a://mineralvision-lakehouse/spark-events
+                -Dspark.hadoop.fs.s3a.endpoint=http://minio.lakehouse.svc.cluster.local:9000
+                -Dspark.hadoop.fs.s3a.access.key=$(AWS_ACCESS_KEY_ID)
+                -Dspark.hadoop.fs.s3a.secret.key=$(AWS_SECRET_ACCESS_KEY)
+                -Dspark.hadoop.fs.s3a.path.style.access=true
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secrets
+                  key: root-user
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: minio-secrets
+                  key: root-password
+          ports:
+            - containerPort: 18080
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "1"
+          volumeMounts:
+            - name: spark-config
+              mountPath: /opt/spark/conf/spark-defaults.conf
+              subPath: spark-defaults.conf
+      volumes:
+        - name: spark-config
+          configMap:
+            name: spark-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-history-server
+  namespace: lakehouse
+spec:
+  selector:
+    app: spark-history-server
+  ports:
+    - port: 18080
+      targetPort: 18080
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark
+  namespace: lakehouse
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spark-role
+  namespace: lakehouse
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spark-role-binding
+  namespace: lakehouse
+subjects:
+  - kind: ServiceAccount
+    name: spark
+    namespace: lakehouse
+roleRef:
+  kind: Role
+  name: spark-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trino-coordinator
+  namespace: lakehouse
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: trino
+      component: coordinator
+  template:
+    metadata:
+      labels:
+        app: trino
+        component: coordinator
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values:
+                        - coordinator
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: trino
+          image: trinodb/trino:435
+          ports:
+            - containerPort: 8080
+          env:
+            - name: TRINO_ENVIRONMENT
+              value: production
+          resources:
+            requests:
+              memory: "4Gi"
+              cpu: "2"
+            limits:
+              memory: "8Gi"
+              cpu: "4"
+          volumeMounts:
+            - name: trino-config
+              mountPath: /etc/trino
+      volumes:
+        - name: trino-config
+          configMap:
+            name: trino-coordinator-config
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: trino-worker
+  namespace: lakehouse
+spec:
+  serviceName: trino-worker-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: trino
+      component: worker
+  template:
+    metadata:
+      labels:
+        app: trino
+        component: worker
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: component
+                      operator: In
+                      values:
+                        - worker
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: trino
+          image: trinodb/trino:435
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              memory: "8Gi"
+              cpu: "4"
+            limits:
+              memory: "16Gi"
+              cpu: "8"
+          volumeMounts:
+            - name: trino-config
+              mountPath: /etc/trino
+      volumes:
+        - name: trino-config
+          configMap:
+            name: trino-worker-config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-coordinator-config
+  namespace: lakehouse
+data:
+  node.properties: |
+    node.environment=production
+    node.id=${HOSTNAME}
+    node.data-dir=/data/trino
+  jvm.config: |
+    -server
+    -Xmx6G
+    -XX:+UseG1GC
+    -XX:G1HeapRegionSize=32M
+    -XX:+UseGCOverheadLimit
+    -XX:+ExplicitGCInvokesConcurrent
+    -XX:+HeapDumpOnOutOfMemoryError
+    -XX:+ExitOnOutOfMemoryError
+    -Djdk.attach.allowAttachSelf=true
+  config.properties: |
+    coordinator=true
+    node-scheduler.include-coordinator=false
+    http-server.http.port=8080
+    query.max-memory=4GB
+    query.max-memory-per-node=1GB
+    discovery.uri=http://trino-coordinator:8080
+  catalog/delta.properties: |
+    connector.name=delta_lake
+    hive.metastore.uri=thrift://hive-metastore:9083
+    hive.s3.endpoint=http://minio.lakehouse.svc.cluster.local:9000
+    hive.s3.path-style-access=true
+    hive.s3.aws-access-key=${AWS_ACCESS_KEY_ID}
+    hive.s3.aws-secret-key=${AWS_SECRET_ACCESS_KEY}
+    delta.enable-non-concurrent-writes=true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trino-worker-config
+  namespace: lakehouse
+data:
+  node.properties: |
+    node.environment=production
+    node.id=${HOSTNAME}
+    node.data-dir=/data/trino
+  jvm.config: |
+    -server
+    -Xmx12G
+    -XX:+UseG1GC
+    -XX:G1HeapRegionSize=32M
+    -XX:+UseGCOverheadLimit
+    -XX:+ExplicitGCInvokesConcurrent
+    -XX:+HeapDumpOnOutOfMemoryError
+    -XX:+ExitOnOutOfMemoryError
+    -Djdk.attach.allowAttachSelf=true
+  config.properties: |
+    coordinator=false
+    http-server.http.port=8080
+    query.max-memory=4GB
+    query.max-memory-per-node=2GB
+    discovery.uri=http://trino-coordinator:8080
+  catalog/delta.properties: |
+    connector.name=delta_lake
+    hive.metastore.uri=thrift://hive-metastore:9083
+    hive.s3.endpoint=http://minio.lakehouse.svc.cluster.local:9000
+    hive.s3.path-style-access=true
+    hive.s3.aws-access-key=${AWS_ACCESS_KEY_ID}
+    hive.s3.aws-secret-key=${AWS_SECRET_ACCESS_KEY}
+    delta.enable-non-concurrent-writes=true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino-coordinator
+  namespace: lakehouse
+spec:
+  selector:
+    app: trino
+    component: coordinator
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: trino-worker-headless
+  namespace: lakehouse
+spec:
+  clusterIP: None
+  selector:
+    app: trino
+    component: worker
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: minio-pdb
+  namespace: lakehouse
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app: minio
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: trino-worker-pdb
+  namespace: lakehouse
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: trino
+      component: worker

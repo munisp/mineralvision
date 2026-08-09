@@ -1,0 +1,260 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: permify
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: permify-config
+  namespace: permify
+data:
+  config.yaml: |
+    server:
+      http:
+        enabled: true
+        port: 3476
+      grpc:
+        port: 3478
+      rate_limit: 100
+    logger:
+      level: info
+      output: stdout
+    profiler:
+      enabled: true
+      port: 6060
+    authn:
+      enabled: true
+      method: preshared
+      preshared:
+        keys:
+          - mineralvision_permify_key_change_me
+    tracer:
+      enabled: true
+      exporter: otlp
+      endpoint: otel-collector.observability.svc.cluster.local:4317
+      insecure: true
+    meter:
+      enabled: true
+      exporter: otlp
+      endpoint: otel-collector.observability.svc.cluster.local:4317
+      insecure: true
+    service:
+      circuit_breaker: true
+      watch:
+        enabled: true
+      schema:
+        cache:
+          number_of_counters: 1000
+          max_cost: 10MiB
+      permission:
+        bulk_limit: 100
+        concurrency_limit: 100
+        cache:
+          number_of_counters: 10000
+          max_cost: 10MiB
+      relationship:
+        cache:
+          number_of_counters: 10000
+          max_cost: 10MiB
+    database:
+      engine: postgres
+      uri: postgres://permify:permify_password@postgresql-ha-pgpool.postgresql.svc.cluster.local:5432/permify?sslmode=disable
+      auto_migrate: true
+      max_open_connections: 20
+      max_idle_connections: 5
+      max_connection_lifetime: 300s
+      max_connection_idle_time: 60s
+      garbage_collection:
+        enabled: true
+        interval: 3h
+        timeout: 3m
+        window: 720h
+    distributed:
+      enabled: true
+      address: permify-headless.permify.svc.cluster.local:5053
+      port: 5053
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: permify
+  namespace: permify
+spec:
+  serviceName: permify-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: permify
+  template:
+    metadata:
+      labels:
+        app: permify
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - permify
+              topologyKey: kubernetes.io/hostname
+      containers:
+        - name: permify
+          image: ghcr.io/permify/permify:v0.8.0
+          args:
+            - serve
+            - --config=/etc/permify/config.yaml
+          ports:
+            - containerPort: 3476
+              name: http
+            - containerPort: 3478
+              name: grpc
+            - containerPort: 5053
+              name: cluster
+            - containerPort: 6060
+              name: profiler
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3476
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3476
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/permify
+      volumes:
+        - name: config
+          configMap:
+            name: permify-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: permify-headless
+  namespace: permify
+spec:
+  clusterIP: None
+  selector:
+    app: permify
+  ports:
+    - name: http
+      port: 3476
+      targetPort: 3476
+    - name: grpc
+      port: 3478
+      targetPort: 3478
+    - name: cluster
+      port: 5053
+      targetPort: 5053
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: permify
+  namespace: permify
+spec:
+  selector:
+    app: permify
+  ports:
+    - name: http
+      port: 3476
+      targetPort: 3476
+    - name: grpc
+      port: 3478
+      targetPort: 3478
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: permify-pdb
+  namespace: permify
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: permify
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: permify-schema
+  namespace: permify
+data:
+  schema.perm: |
+    entity user {}
+    
+    entity organization {
+      relation admin @user
+      relation member @user
+      relation viewer @user
+      
+      permission manage = admin
+      permission write = admin or member
+      permission read = admin or member or viewer
+    }
+    
+    entity project {
+      relation organization @organization
+      relation owner @user
+      relation editor @user
+      relation viewer @user
+      
+      permission manage = owner or organization.admin
+      permission write = owner or editor or organization.write
+      permission read = owner or editor or viewer or organization.read
+    }
+    
+    entity mineral_deposit {
+      relation project @project
+      relation discoverer @user
+      relation analyst @user
+      
+      permission manage = project.manage
+      permission analyze = analyst or project.write
+      permission view = project.read
+    }
+    
+    entity sensor_data {
+      relation project @project
+      relation uploader @user
+      
+      permission manage = project.manage
+      permission upload = uploader or project.write
+      permission view = project.read
+    }
+    
+    entity prediction {
+      relation project @project
+      relation creator @user
+      
+      permission manage = project.manage
+      permission create = creator or project.write
+      permission view = project.read
+    }
+    
+    entity report {
+      relation project @project
+      relation author @user
+      relation reviewer @user
+      
+      permission manage = project.manage
+      permission edit = author or project.write
+      permission review = reviewer or project.write
+      permission view = project.read
+    }

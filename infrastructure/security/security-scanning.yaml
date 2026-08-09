@@ -1,0 +1,383 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: trivy-config
+  namespace: security
+data:
+  trivy.yaml: |
+    # Trivy configuration for vulnerability scanning
+    scan:
+      security-checks:
+        - vuln
+        - config
+        - secret
+      severity:
+        - CRITICAL
+        - HIGH
+        - MEDIUM
+      ignore-unfixed: false
+      
+    cache:
+      dir: /tmp/trivy-cache
+      
+    db:
+      repository: ghcr.io/aquasecurity/trivy-db
+      
+    vulnerability:
+      type:
+        - os
+        - library
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: image-vulnerability-scan
+  namespace: security
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: security-scanner
+          containers:
+            - name: trivy
+              image: aquasec/trivy:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  # Scan all images in the cluster
+                  for ns in mineralvision kafka redis temporal keycloak apisix vault; do
+                    echo "Scanning namespace: $ns"
+                    for pod in $(kubectl get pods -n $ns -o jsonpath='{.items[*].spec.containers[*].image}' | tr ' ' '\n' | sort -u); do
+                      echo "Scanning image: $pod"
+                      trivy image --severity HIGH,CRITICAL --format json --output /reports/${ns}-${pod//\//-}.json $pod || true
+                    done
+                  done
+                  
+                  # Generate summary report
+                  echo "=== Vulnerability Summary ===" > /reports/summary.txt
+                  for f in /reports/*.json; do
+                    if [ -f "$f" ]; then
+                      echo "File: $f" >> /reports/summary.txt
+                      jq -r '.Results[]? | select(.Vulnerabilities) | "\(.Target): \(.Vulnerabilities | length) vulnerabilities"' $f >> /reports/summary.txt 2>/dev/null || true
+                    fi
+                  done
+                  
+                  # Upload to S3
+                  mc cp -r /reports/ backup/security-reports/$(date +%Y%m%d)/
+              volumeMounts:
+                - name: trivy-config
+                  mountPath: /etc/trivy
+                - name: reports
+                  mountPath: /reports
+              resources:
+                requests:
+                  memory: "512Mi"
+                  cpu: "250m"
+                limits:
+                  memory: "2Gi"
+                  cpu: "1"
+          volumes:
+            - name: trivy-config
+              configMap:
+                name: trivy-config
+            - name: reports
+              emptyDir: {}
+          restartPolicy: OnFailure
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kubernetes-security-audit
+  namespace: security
+spec:
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: security-scanner
+          containers:
+            - name: kube-bench
+              image: aquasec/kube-bench:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  kube-bench run --targets node,master,controlplane,etcd,policies \
+                    --json --outputfile /reports/kube-bench-$(date +%Y%m%d).json
+                  
+                  # Generate summary
+                  jq -r '.Controls[] | "\(.id) \(.text): \(.tests | map(select(.status == "FAIL")) | length) failures"' \
+                    /reports/kube-bench-$(date +%Y%m%d).json > /reports/kube-bench-summary.txt
+                  
+                  mc cp -r /reports/ backup/security-reports/kube-bench/
+              volumeMounts:
+                - name: reports
+                  mountPath: /reports
+          volumes:
+            - name: reports
+              emptyDir: {}
+          restartPolicy: OnFailure
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: secret-scanning
+  namespace: security
+spec:
+  schedule: "0 4 * * *"  # Daily at 4 AM
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: security-scanner
+          containers:
+            - name: gitleaks
+              image: zricethezav/gitleaks:latest
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  # Scan for secrets in ConfigMaps
+                  for ns in mineralvision kafka redis temporal keycloak; do
+                    kubectl get configmaps -n $ns -o yaml > /tmp/configmaps-$ns.yaml
+                    gitleaks detect --source /tmp/configmaps-$ns.yaml --report-path /reports/secrets-$ns.json --report-format json || true
+                  done
+                  
+                  # Generate summary
+                  echo "=== Secret Scanning Summary ===" > /reports/secrets-summary.txt
+                  for f in /reports/secrets-*.json; do
+                    if [ -f "$f" ]; then
+                      count=$(jq '. | length' $f 2>/dev/null || echo 0)
+                      echo "$(basename $f): $count potential secrets found" >> /reports/secrets-summary.txt
+                    fi
+                  done
+                  
+                  mc cp -r /reports/ backup/security-reports/secrets/
+              volumeMounts:
+                - name: reports
+                  mountPath: /reports
+          volumes:
+            - name: reports
+              emptyDir: {}
+          restartPolicy: OnFailure
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: security-scanner
+  namespace: security
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: security-scanner
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "configmaps", "secrets", "namespaces", "nodes"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: security-scanner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: security-scanner
+subjects:
+  - kind: ServiceAccount
+    name: security-scanner
+    namespace: security
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: falco-rules
+  namespace: security
+data:
+  mineralvision-rules.yaml: |
+    # Custom Falco rules for MineralVision
+    
+    - rule: Unauthorized API Access
+      desc: Detect unauthorized access to MineralVision APIs
+      condition: >
+        evt.type in (accept, connect) and
+        container.name startswith "mineralvision" and
+        not (fd.sport in (8000, 8080, 443))
+      output: >
+        Unauthorized API access detected
+        (user=%user.name command=%proc.cmdline connection=%fd.name container=%container.name)
+      priority: WARNING
+      tags: [network, mineralvision]
+    
+    - rule: Sensitive File Access
+      desc: Detect access to sensitive configuration files
+      condition: >
+        open_read and
+        container.name startswith "mineralvision" and
+        (fd.name contains "/etc/secrets" or
+         fd.name contains ".env" or
+         fd.name contains "credentials")
+      output: >
+        Sensitive file accessed
+        (user=%user.name command=%proc.cmdline file=%fd.name container=%container.name)
+      priority: WARNING
+      tags: [filesystem, mineralvision]
+    
+    - rule: Crypto Mining Detection
+      desc: Detect potential crypto mining activity
+      condition: >
+        spawned_process and
+        (proc.name in (xmrig, minerd, cpuminer) or
+         proc.cmdline contains "stratum+tcp" or
+         proc.cmdline contains "pool.minergate")
+      output: >
+        Potential crypto mining detected
+        (user=%user.name command=%proc.cmdline container=%container.name)
+      priority: CRITICAL
+      tags: [process, cryptomining]
+    
+    - rule: Shell in Container
+      desc: Detect shell spawned in production container
+      condition: >
+        spawned_process and
+        container and
+        container.name startswith "mineralvision" and
+        proc.name in (bash, sh, zsh, dash)
+      output: >
+        Shell spawned in container
+        (user=%user.name shell=%proc.name container=%container.name)
+      priority: WARNING
+      tags: [process, shell]
+    
+    - rule: Database Credential Access
+      desc: Detect access to database credentials
+      condition: >
+        open_read and
+        (fd.name contains "postgres" or
+         fd.name contains "redis" or
+         fd.name contains "kafka") and
+        fd.name contains "password"
+      output: >
+        Database credential file accessed
+        (user=%user.name file=%fd.name container=%container.name)
+      priority: WARNING
+      tags: [filesystem, credentials]
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: falco
+  namespace: security
+spec:
+  selector:
+    matchLabels:
+      app: falco
+  template:
+    metadata:
+      labels:
+        app: falco
+    spec:
+      serviceAccountName: falco
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - name: falco
+          image: falcosecurity/falco:latest
+          securityContext:
+            privileged: true
+          args:
+            - /usr/bin/falco
+            - --cri
+            - /run/containerd/containerd.sock
+            - -K
+            - /var/run/secrets/kubernetes.io/serviceaccount/token
+            - -k
+            - https://kubernetes.default
+            - -pk
+          volumeMounts:
+            - name: containerd-socket
+              mountPath: /run/containerd/containerd.sock
+            - name: dev
+              mountPath: /host/dev
+            - name: proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: boot
+              mountPath: /host/boot
+              readOnly: true
+            - name: lib-modules
+              mountPath: /host/lib/modules
+              readOnly: true
+            - name: usr
+              mountPath: /host/usr
+              readOnly: true
+            - name: falco-rules
+              mountPath: /etc/falco/rules.d
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: containerd-socket
+          hostPath:
+            path: /run/containerd/containerd.sock
+        - name: dev
+          hostPath:
+            path: /dev
+        - name: proc
+          hostPath:
+            path: /proc
+        - name: boot
+          hostPath:
+            path: /boot
+        - name: lib-modules
+          hostPath:
+            path: /lib/modules
+        - name: usr
+          hostPath:
+            path: /usr
+        - name: falco-rules
+          configMap:
+            name: falco-rules
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: falco
+  namespace: security
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: falco
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: falco
+    namespace: security

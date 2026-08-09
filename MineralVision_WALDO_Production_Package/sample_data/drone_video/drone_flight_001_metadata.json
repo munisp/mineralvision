@@ -1,0 +1,81 @@
+{
+  "metadata": {
+    "camera_id": "drone_cam_01",
+    "flight_id": "mission_2025_04_15_001",
+    "timestamp": "2025-04-15T10:30:00Z",
+    "location": {
+      "latitude": 37.7749,
+      "longitude": -122.4194,
+      "altitude": 120.5
+    },
+    "camera_params": {
+      "focal_length": 35.0,
+      "sensor_width": 23.5,
+      "image_width": 3840,
+      "image_height": 2160
+    },
+    "flight_params": {
+      "speed": 5.2,
+      "heading": 275.3,
+      "mission_type": "survey"
+    }
+  },
+  "annotations": [
+    {
+      "id": "obj_001",
+      "class": "vehicle",
+      "bbox": [1200, 800, 1400, 950],
+      "confidence": 0.95,
+      "attributes": {
+        "type": "truck",
+        "color": "white",
+        "size": "large"
+      }
+    },
+    {
+      "id": "obj_002",
+      "class": "person",
+      "bbox": [2100, 1200, 2150, 1300],
+      "confidence": 0.87,
+      "attributes": {
+        "posture": "standing",
+        "wearing_ppe": true
+      }
+    },
+    {
+      "id": "obj_003",
+      "class": "equipment",
+      "bbox": [500, 600, 700, 750],
+      "confidence": 0.92,
+      "attributes": {
+        "type": "excavator",
+        "operational_status": "active"
+      }
+    }
+  ],
+  "measurements": {
+    "ground_resolution": 0.05,
+    "estimated_distances": {
+      "obj_001": 45.2,
+      "obj_002": 62.7,
+      "obj_003": 38.1
+    },
+    "estimated_dimensions": {
+      "obj_001": {
+        "width": 5.2,
+        "height": 2.8,
+        "area": 14.56
+      },
+      "obj_002": {
+        "width": 0.5,
+        "height": 1.8,
+        "area": 0.9
+      },
+      "obj_003": {
+        "width": 4.1,
+        "height": 3.2,
+        "area": 13.12
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+"""
+Data Catalog module for MineralVision.
+
+Provides data catalog and discovery capabilities.
+"""
+
+from .data_catalog import (
+    AssetType,
+    DataFormat,
+    DataDomain,
+    QualityLevel,
+    LineageType,
+    SchemaField,
+    Schema,
+    DataQualityProfile,
+    SpatialExtent,
+    TemporalExtent,
+    LineageEdge,
+    Tag,
+    GlossaryTerm,
+    DataAsset,
+    SearchQuery,
+    SearchResult,
+    SearchIndex,
+    LineageGraph,
+    DataQualityProfiler,
+    SchemaRegistry,
+    BusinessGlossary,
+    DataCatalog,
+    create_data_catalog,
+    create_schema_registry,
+    create_business_glossary,
+)
+
+__all__ = [
+    'AssetType',
+    'DataFormat',
+    'DataDomain',
+    'QualityLevel',
+    'LineageType',
+    'SchemaField',
+    'Schema',
+    'DataQualityProfile',
+    'SpatialExtent',
+    'TemporalExtent',
+    'LineageEdge',
+    'Tag',
+    'GlossaryTerm',
+    'DataAsset',
+    'SearchQuery',
+    'SearchResult',
+    'SearchIndex',
+    'LineageGraph',
+    'DataQualityProfiler',
+    'SchemaRegistry',
+    'BusinessGlossary',
+    'DataCatalog',
+    'create_data_catalog',
+    'create_schema_registry',
+    'create_business_glossary',
+]
