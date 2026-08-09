@@ -17,6 +17,7 @@ class EntityStateModel(Base):
     __tablename__ = "sync_entity_state"
 
     entity_id = Column(String(128), primary_key=True)
+    entity_type = Column(String(32), nullable=True)  # field_log | sample | photo | ...
     version = Column(Integer, nullable=False, default=0)  # monotonically increasing
     data = Column(JSON, nullable=False, default=dict)
     deleted = Column(Boolean, nullable=False, default=False)
@@ -31,6 +32,8 @@ class SyncOpModel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     client_op_id = Column(String(64), nullable=False, unique=True)  # idempotency key
     entity_id = Column(String(128), nullable=False, index=True)
+    entity_type = Column(String(32), nullable=True)
+    device_id = Column(String(64), nullable=True, index=True)  # originating device
     op = Column(String(16), nullable=False)  # create | update | delete
     base_version = Column(Integer, nullable=False)
     applied_version = Column(Integer, nullable=True)  # version after apply; NULL when conflict
@@ -59,3 +62,17 @@ class ConflictModel(Base):
     server_payload = Column(JSON, nullable=False, default=dict)
     resolution = Column(String(32), nullable=False, default="server_wins")
     created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+
+class DeviceCursorModel(Base):
+    """Per-device sync cursor for delta downloads.
+
+    ``cursor`` is the highest applied entity version this device has already
+    seen; the next pull returns only ops with applied_version > cursor.
+    """
+
+    __tablename__ = "sync_device_cursors"
+
+    device_id = Column(String(64), primary_key=True)
+    cursor = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
