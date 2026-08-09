@@ -22,7 +22,6 @@ import Molmo2Page from './pages/molmo2/Molmo2Page';
 import SettingsPage from './pages/settings/SettingsPage';
 import UsersPage from './pages/admin/UsersPage';
 import JourneysPage from './pages/journeys/JourneysPage';
-import CropMonitoringPage from './pages/crop-monitoring/CropMonitoringPage';
 import MineralMonitoringPage from './pages/mineral-monitoring/MineralMonitoringPage';
 import { Toaster } from './components/ui/toaster';
 
@@ -69,7 +68,6 @@ function App() {
                                                                                 <Route path="ai-insights" element={<AIInsightsPage />} />
                                                                                           <Route path="molmo2" element={<Molmo2Page />} />
                                         <Route path="journeys" element={<JourneysPage />} />
-                                                                                <Route path="crop-monitoring" element={<CropMonitoringPage />} />
                                                                                 <Route path="mineral-monitoring" element={<MineralMonitoringPage />} />
                                                                                 <Route path="settings" element={<SettingsPage />} />
                     <Route path="admin/users" element={<UsersPage />} />
