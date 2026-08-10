@@ -25,6 +25,19 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger(__name__)
 
+MOCK_FALLBACK_ENV = "MV_ALLOW_MOCK_FALLBACK"
+
+
+def mock_fallback_allowed() -> bool:
+    """True only when MV_ALLOW_MOCK_FALLBACK=true is explicitly set."""
+    import os
+    return os.environ.get(MOCK_FALLBACK_ENV, "").strip().lower() == "true"
+
+
+class ClimateDataUnavailableError(RuntimeError):
+    """Raised in strict mode when a real climate data backend (CDS/ERA5,
+    OpenWeather) fails and synthetic fallback is refused."""
+
 
 class ClimateDataSource(Enum):
     """Supported climate data sources."""
@@ -117,9 +130,13 @@ class ERA5Provider(ClimateDataProvider):
         self._cache: Dict[str, xr.Dataset] = {}
         
     def fetch_data(self, data_type: str, region: Dict[str, float],
-                   time_range: Tuple[str, str]) -> xr.Dataset:
+                   time_range: Tuple[str, str], strict: bool = False) -> xr.Dataset:
         """
         Fetch ERA5 reanalysis data.
+
+        Args:
+            strict: when True, raise ClimateDataUnavailableError instead of
+                falling back to synthetic data on CDS failure.
         
         Args:
             data_type: Type of data (temperature, precipitation, wind, etc.)
@@ -169,9 +186,19 @@ class ERA5Provider(ClimateDataProvider):
         # Attempt to fetch from CDS API
         try:
             data = self._fetch_from_cds(request_params)
+            data.attrs['synthetic'] = False
         except Exception as e:
+            if strict:
+                raise ClimateDataUnavailableError(
+                    f"CDS/ERA5 backend failed ({e}) and strict=True refuses "
+                    "synthetic fallback. Remediation: configure CDS API "
+                    "credentials, or call with strict=False / set "
+                    "MV_ALLOW_MOCK_FALLBACK=true for tagged synthetic data."
+                ) from e
             logger.warning(f"CDS API unavailable, generating synthetic data: {e}")
             data = self._generate_realistic_data(data_type, region, time_range)
+            data.attrs['synthetic'] = True
+            data.attrs['synthetic_reason'] = f"CDS API failure: {e}"
         
         if self.config.cache_enabled:
             self._cache[cache_key] = data
@@ -296,7 +323,7 @@ class ERA5Provider(ClimateDataProvider):
             data = xr.Dataset(
                 data_vars={data_type: (('time', 'latitude', 'longitude'), data_values)},
                 coords={'time': dates, 'latitude': lats, 'longitude': lons},
-                attrs={'source': 'ERA5-like synthetic'}
+                attrs={'source': 'ERA5-like synthetic', 'synthetic': True}
             )
             
         return data
@@ -340,8 +367,12 @@ class OpenWeatherMapProvider(ClimateDataProvider):
         self.base_url = config.base_url or "https://api.openweathermap.org/data/2.5"
         
     def fetch_data(self, data_type: str, region: Dict[str, float],
-                   time_range: Tuple[str, str]) -> xr.Dataset:
-        """Fetch current weather data from OpenWeatherMap."""
+                   time_range: Tuple[str, str], strict: bool = False) -> xr.Dataset:
+        """Fetch current weather data from OpenWeatherMap.
+
+        Args:
+            strict: when True, raise ClimateDataUnavailableError instead of
+                falling back to synthetic data on API failure."""
         import requests
         
         # Calculate center of region
@@ -364,12 +395,24 @@ class OpenWeatherMapProvider(ClimateDataProvider):
             data = response.json()
             
             # Convert to xarray Dataset
-            return self._convert_to_dataset(data, region)
-            
+            ds = self._convert_to_dataset(data, region)
+            ds.attrs['synthetic'] = False
+            return ds
+
         except Exception as e:
+            if strict:
+                raise ClimateDataUnavailableError(
+                    f"OpenWeatherMap backend failed ({e}) and strict=True "
+                    "refuses synthetic fallback. Remediation: configure a "
+                    "valid OpenWeather API key, or call with strict=False "
+                    "for tagged synthetic data."
+                ) from e
             logger.warning(f"OpenWeatherMap API error: {e}")
-            # Return synthetic current data
-            return self._generate_current_data(region)
+            # Return synthetic current data — honestly tagged
+            ds = self._generate_current_data(region)
+            ds.attrs['synthetic'] = True
+            ds.attrs['synthetic_reason'] = f"OpenWeatherMap API failure: {e}"
+            return ds
     
     def _convert_to_dataset(self, api_data: Dict, region: Dict) -> xr.Dataset:
         """Convert API response to xarray Dataset."""
@@ -913,6 +956,8 @@ class SatelliteClimateObserver:
             coords={'time': dates, 'latitude': lats, 'longitude': lons},
             attrs={
                 'source': 'GPM-like satellite estimate',
+                'synthetic': True,
+                'synthetic_reason': 'procedurally generated estimate, not satellite retrieval',
                 'units': 'mm/day'
             }
         )
