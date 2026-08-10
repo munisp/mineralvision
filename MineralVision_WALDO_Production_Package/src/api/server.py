@@ -9,6 +9,7 @@ import os
 import time
 import json
 import logging
+import numpy as np
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
@@ -60,13 +61,37 @@ def load_config(config_path):
             }
         }
 
-@app.before_first_request
-def initialize():
-    """Initialize the WALDO integration module before the first request."""
+# Flask 3 removed @app.before_first_request — use lazy one-shot init instead.
+def get_waldo_module():
+    """Return the WALDO integration module, initializing it on first use."""
     global waldo_module
-    config = load_config(config_path)
-    waldo_module = WALDOIntegrationModule(config)
-    logger.info("WALDO integration module initialized")
+    if waldo_module is None:
+        config = load_config(config_path)
+        waldo_module = WALDOIntegrationModule(config)
+        logger.info("WALDO integration module initialized")
+    return waldo_module
+
+
+# Record start time at import so /api/status works under any WSGI server.
+app.start_time = time.time()
+
+
+def _detections_to_proxy_shape(detections, max_detections=None):
+    """Map internal detection dicts to the MineralVision waldo_proxy
+    DetectionResult shape (BoundingBox: x_min/y_min/x_max/y_max/...)."""
+    out = []
+    for det in detections[:max_detections] if max_detections else detections:
+        x1, y1, x2, y2 = det['bbox']
+        out.append({
+            'x_min': float(x1),
+            'y_min': float(y1),
+            'x_max': float(x2),
+            'y_max': float(y2),
+            'confidence': float(det['confidence']),
+            'class_name': det.get('class_name', f"class_{det.get('class_id', 0)}"),
+            'class_id': int(det.get('class_id', 0)),
+        })
+    return out
 
 # API Routes
 
@@ -126,15 +151,16 @@ def process_image():
         }
         
         # Override confidence threshold if provided
+        module = get_waldo_module()
         if confidence_threshold:
-            original_threshold = waldo_module.detector.confidence_threshold
-            waldo_module.detector.confidence_threshold = confidence_threshold
-        
-        result = waldo_module.process_frame(image, metadata)
-        
+            original_threshold = module.detector.confidence_threshold
+            module.detector.confidence_threshold = confidence_threshold
+
+        result = module.process_frame(image, metadata)
+
         # Restore original threshold
         if confidence_threshold:
-            waldo_module.detector.confidence_threshold = original_threshold
+            module.detector.confidence_threshold = original_threshold
         
         # Clean up
         os.remove(temp_path)
@@ -148,6 +174,123 @@ def process_image():
     
     except Exception as e:
         logger.error(f"Error processing image: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+def _parse_classes(value):
+    """Parse classes from JSON string, comma-separated string, or list."""
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value
+    value = str(value).strip()
+    if value.startswith('['):
+        return json.loads(value)
+    return [c.strip() for c in value.split(',') if c.strip()]
+
+
+@app.route('/detect', methods=['POST'])
+def detect_multipart():
+    """MineralVision waldo_proxy-compatible detection endpoint (multipart).
+
+    Accepts the proxy's payload: files={'image': (filename, bytes)},
+    form fields confidence_threshold, max_detections, classes (comma-joined).
+    Responds with the proxy's DetectionResult shape.
+    """
+    try:
+        if 'image' not in request.files:
+            return jsonify({'error': 'No image provided'}), 400
+        file = request.files['image']
+        if file.filename == '':
+            return jsonify({'error': 'No image selected'}), 400
+
+        confidence_threshold = request.form.get('confidence_threshold', None)
+        if confidence_threshold:
+            confidence_threshold = float(confidence_threshold)
+        max_detections = int(request.form.get('max_detections', 100))
+        classes = _parse_classes(request.form.get('classes', None))
+
+        import cv2
+        file_bytes = np.frombuffer(file.read(), np.uint8)
+        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
+        if image is None:
+            return jsonify({'error': 'Failed to decode image'}), 400
+
+        module = get_waldo_module()
+        if confidence_threshold:
+            original_threshold = module.detector.confidence_threshold
+            module.detector.confidence_threshold = confidence_threshold
+        result = module.process_frame(
+            image, {'source': file.filename, 'timestamp': time.time(),
+                    'classes': classes})
+        if confidence_threshold:
+            module.detector.confidence_threshold = original_threshold
+
+        detections = result['detections']
+        if classes:
+            detections = [d for d in detections
+                          if d.get('class_name') in classes]
+
+        return jsonify({
+            'image_id': f"img_{int(time.time() * 1000)}",
+            'detections': _detections_to_proxy_shape(detections, max_detections),
+            'processing_time_ms': result['processing_time'] * 1000.0,
+            'model_version': getattr(module, 'model_name', None)
+                             or module.config.get('model_name', 'waldo'),
+        })
+    except Exception as e:
+        logger.error(f"Error in /detect: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/detect/url', methods=['POST'])
+def detect_from_url():
+    """MineralVision waldo_proxy-compatible detection endpoint (JSON body).
+
+    Accepts {'image_url', 'confidence_threshold', 'max_detections',
+    'classes' (list)} and responds with the proxy's DetectionResult shape.
+    """
+    try:
+        payload = request.get_json(force=True)
+        image_url = payload.get('image_url')
+        if not image_url:
+            return jsonify({'error': 'image_url is required'}), 400
+        confidence_threshold = payload.get('confidence_threshold')
+        max_detections = int(payload.get('max_detections', 100))
+        classes = _parse_classes(payload.get('classes'))
+
+        import cv2
+        import urllib.request
+        with urllib.request.urlopen(image_url, timeout=30) as resp:
+            data = resp.read()
+        image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        if image is None:
+            return jsonify({'error': 'Failed to decode image from URL'}), 400
+
+        module = get_waldo_module()
+        if confidence_threshold:
+            original_threshold = module.detector.confidence_threshold
+            module.detector.confidence_threshold = float(confidence_threshold)
+        result = module.process_frame(
+            image, {'source': image_url, 'timestamp': time.time(),
+                    'classes': classes})
+        if confidence_threshold:
+            module.detector.confidence_threshold = original_threshold
+
+        detections = result['detections']
+        if classes:
+            detections = [d for d in detections
+                          if d.get('class_name') in classes]
+
+        return jsonify({
+            'image_id': f"img_{int(time.time() * 1000)}",
+            'detections': _detections_to_proxy_shape(detections, max_detections),
+            'processing_time_ms': result['processing_time'] * 1000.0,
+            'model_version': getattr(module, 'model_name', None)
+                             or module.config.get('model_name', 'waldo'),
+        })
+    except Exception as e:
+        logger.error(f"Error in /detect/url: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/detection/video', methods=['POST'])
@@ -193,16 +336,17 @@ def process_video():
                 }
                 
                 # Override confidence threshold if provided
+                module = get_waldo_module()
                 if confidence_threshold:
-                    original_threshold = waldo_module.detector.confidence_threshold
-                    waldo_module.detector.confidence_threshold = confidence_threshold
+                    original_threshold = module.detector.confidence_threshold
+                    module.detector.confidence_threshold = confidence_threshold
                 
                 # Process video
-                result = waldo_module.process_video(temp_path, metadata)
+                result = module.process_video(temp_path, metadata)
                 
                 # Restore original threshold
                 if confidence_threshold:
-                    waldo_module.detector.confidence_threshold = original_threshold
+                    module.detector.confidence_threshold = original_threshold
                 
                 # Store results
                 with open(f"/tmp/{job_id}_results.json", 'w') as f:
@@ -332,7 +476,7 @@ def get_detections():
             filters['end_time'] = float(end_time)
         
         # Get detections
-        detections = waldo_module.get_detections(filters, limit)
+        detections = get_waldo_module().get_detections(filters, limit)
         
         # Return results
         return jsonify({
@@ -365,7 +509,7 @@ def sync_to_arcgis():
             'arcgis_url': os.environ.get('ARCGIS_URL', 'https://arcgis.example.com'),
             'arcgis_username': os.environ.get('ARCGIS_USERNAME', 'mineralvision'),
             'arcgis_password': os.environ.get('ARCGIS_PASSWORD', 'password'),
-            'waldo': waldo_module.config
+            'waldo': get_waldo_module().config
         }
         
         # Initialize ArcGIS connector
