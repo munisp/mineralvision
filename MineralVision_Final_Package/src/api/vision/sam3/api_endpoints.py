@@ -169,12 +169,24 @@ def _segment_or_503(call, fallback_concept: str, prompt_type: str,
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+def _parse_form_model(payload: str, model, name: str):
+    """Parse a JSON-encoded form field into a Pydantic model (a JSON body
+    cannot be combined with multipart file uploads in one request)."""
+    try:
+        return model.model_validate_json(payload)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"invalid JSON for form field '{name}': {exc}") from exc
+
+
 @router.post("/segment/text", response_model=SegmentationResponse)
 async def segment_by_text(
-    request: TextSegmentationRequest,
     image: UploadFile = File(..., description="Image to segment"),
+    request: str = Form(..., description="JSON-encoded TextSegmentationRequest"),
     allow_empty_fallback: bool = False
 ):
+    request = _parse_form_model(request, TextSegmentationRequest, "request")
     """
     Segment image using text prompt.
     
@@ -251,10 +263,11 @@ async def segment_by_text(
 
 @router.post("/segment/point", response_model=SegmentationResponse)
 async def segment_by_point(
-    request: PointSegmentationRequest,
     image: UploadFile = File(..., description="Image to segment"),
+    request: str = Form(..., description="JSON-encoded PointSegmentationRequest"),
     allow_empty_fallback: bool = False
 ):
+    request = _parse_form_model(request, PointSegmentationRequest, "request")
     """
     Segment image using point prompts.
     
@@ -304,11 +317,12 @@ async def segment_by_point(
 
 @router.post("/segment/exemplar", response_model=SegmentationResponse)
 async def segment_by_exemplar(
-    request: ExemplarSegmentationRequest,
     image: UploadFile = File(..., description="Target image to segment"),
     exemplar: UploadFile = File(..., description="Exemplar image showing target concept"),
+    request: str = Form(..., description="JSON-encoded ExemplarSegmentationRequest"),
     allow_empty_fallback: bool = False
 ):
+    request = _parse_form_model(request, ExemplarSegmentationRequest, "request")
     """
     Segment image using exemplar image prompt.
     
@@ -439,8 +453,9 @@ async def start_training_job(
                    "training service. For UI development only, set "
                    "MV_ALLOW_MOCK_FALLBACK=true.")
     try:
-        from .fine_tuning import SAM3FineTuner, TrainingConfig, TrainingStrategy, GeologyDatasetConfig
-        from .data_preparation import GeologySegmentationDataset
+        from .fine_tuning import (SAM3FineTuner, TrainingConfig,
+                                  TrainingStrategy, GeologyDatasetConfig,
+                                  GeologySegmentationDataset)
         import uuid
         
         job_id = f"train_{uuid.uuid4().hex[:8]}"
