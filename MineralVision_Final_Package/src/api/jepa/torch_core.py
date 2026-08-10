@@ -96,20 +96,18 @@ def make_masks(
 
     ctx_count = max(1, int(round(rng.uniform(*ctx_scale) * num_patches)))
     max_tgt = num_patches - ctx_count  # keep enough patches for the context
+    tgt_count = min(max(1, int(round(rng.uniform(*tgt_scale) * num_patches))), max_tgt)
 
     tgt_list = []
-    tgt_count = None
     for _ in range(batch):
-        for _attempt in range(500):
-            idxs = sorted(set(sample_block(tgt_scale)))
-            if tgt_count is None:
-                if len(idxs) <= max_tgt:
-                    tgt_count = len(idxs)
-                    break
-                continue
-            if len(idxs) == tgt_count:
+        idxs = []
+        for _attempt in range(200):
+            cand = sorted(set(sample_block(tgt_scale)))
+            if len(cand) >= tgt_count:
+                pick = rng.choice(len(cand), size=tgt_count, replace=False)
+                idxs = sorted(cand[int(c)] for c in pick)
                 break
-        else:  # fallback: random subset of matching size
+        else:  # fallback: random distinct indices
             idxs = sorted(rng.choice(num_patches, size=tgt_count, replace=False).tolist())
         tgt_list.append(idxs)
 
