@@ -8,6 +8,12 @@ Implements Video Joint-Embedding Predictive Architecture for:
 - Integration with WALDO and SAM3 modules
 
 Based on: https://github.com/facebookresearch/jepa
+
+Decontamination note: this module previously fabricated embeddings and
+training losses with ``numpy.random``. All model-facing paths now go
+through ``api.jepa.torch_core`` (real PyTorch V-JEPA). When torch_core or
+PyTorch is unavailable, a :class:`JEPAUnavailableError` is raised — no
+random numbers are ever returned as if they were model outputs.
 """
 
 import logging
@@ -21,6 +27,58 @@ import json
 import hashlib
 
 logger = logging.getLogger(__name__)
+
+
+class JEPAUnavailableError(RuntimeError):
+    """Raised when a real V-JEPA computation is requested but the
+    torch_core backend (or PyTorch itself) is unavailable.
+
+    This error is deliberately LOUD: callers must never receive silently
+    fabricated embeddings, predictions, or training losses.
+    """
+
+
+def _load_torch_core():
+    """Lazily import the torch_core backend (dual-context import).
+
+    Returns the imported ``torch_core`` module when it is present AND its
+    PyTorch backend is available. Raises :class:`JEPAUnavailableError`
+    otherwise.
+    """
+    torch_core = None
+    import_errors: List[BaseException] = []
+    for module_name in ("src.api.jepa.torch_core", "api.jepa.torch_core"):
+        try:
+            import importlib
+            torch_core = importlib.import_module(module_name)
+            break
+        except ImportError as e:  # pragma: no cover - depends on context
+            import_errors.append(e)
+
+    if torch_core is None:
+        raise JEPAUnavailableError(
+            "V-JEPA torch_core backend is not importable "
+            f"(tried 'src.api.jepa.torch_core' and 'api.jepa.torch_core': "
+            f"{import_errors[-1] if import_errors else 'unknown error'}). "
+            "Install/provide MineralVision_Final_Package/src/api/jepa/torch_core.py "
+            "to enable real embeddings. No fake/random outputs will be produced."
+        )
+
+    try:
+        backend = torch_core.jepa_backend()
+    except Exception as e:
+        raise JEPAUnavailableError(
+            f"torch_core.jepa_backend() failed: {e}. Refusing to fabricate outputs."
+        )
+
+    if not getattr(torch_core, "TORCH_AVAILABLE", False) or backend != "torch":
+        raise JEPAUnavailableError(
+            f"V-JEPA torch backend unavailable (jepa_backend()={backend!r}). "
+            "PyTorch is required for real V-JEPA embeddings/training. "
+            "No fake/random outputs will be produced."
+        )
+
+    return torch_core
 
 
 class ImageryType(Enum):
@@ -811,78 +869,121 @@ class VJEPAEncoder:
     def __init__(self, config: VJEPAConfig):
         self.config = config
         self._model = None
+        self._torch_core = None
+        self._checkpoint_path: Optional[str] = None
         self._device = "cpu"
         
         logger.info(f"Initialized VJEPAEncoder with backbone={config.backbone.value}")
     
     def load_pretrained(self, checkpoint_path: Optional[str] = None) -> None:
-        """Load pretrained weights."""
+        """Load pretrained weights.
+
+        Only records the checkpoint path; the actual torch_core model is
+        constructed lazily on first use so that importing this module never
+        requires PyTorch. Raises :class:`JEPAUnavailableError` on first use
+        if the backend is unavailable.
+        """
         path = checkpoint_path or self.config.pretrained_checkpoint
-        
         if path:
-            logger.info(f"Loading pretrained weights from {path}")
-            self._model = self._build_model()
+            logger.info(f"Will load torch_core weights from {path} on first use")
+            self._checkpoint_path = path
         else:
-            logger.info("Initializing model with random weights")
-            self._model = self._build_model()
-    
-    def _build_model(self) -> Dict[str, Any]:
-        """Build the V-JEPA model architecture."""
-        backbone_configs = {
-            BackboneSize.VIT_BASE: {
-                "embed_dim": 768,
-                "depth": 12,
-                "num_heads": 12,
-                "mlp_ratio": 4.0,
-            },
-            BackboneSize.VIT_LARGE: {
-                "embed_dim": 1024,
-                "depth": 24,
-                "num_heads": 16,
-                "mlp_ratio": 4.0,
-            },
-            BackboneSize.VIT_HUGE: {
-                "embed_dim": 1280,
-                "depth": 32,
-                "num_heads": 16,
-                "mlp_ratio": 4.0,
-            },
+            logger.info("No checkpoint provided; torch_core model will start from scratch")
+
+    def _get_model(self):
+        """Build (once) the real torch_core JEPAModel, or raise honestly."""
+        if self._model is not None:
+            return self._model
+
+        torch_core = _load_torch_core()
+
+        backbone_embed = {
+            BackboneSize.VIT_BASE: 384,
+            BackboneSize.VIT_LARGE: 384,
+            BackboneSize.VIT_HUGE: 384,
         }
-        
-        config = backbone_configs[self.config.backbone]
-        
-        return {
-            "type": "vjepa_encoder",
-            "config": config,
-            "patch_size": self.config.patch_size,
-            "resolution": self.config.resolution,
-            "num_frames": self.config.num_frames,
-            "initialized": True,
-        }
-    
+        jepa_config = torch_core.JEPAConfig(
+            embed_dim=backbone_embed.get(self.config.backbone, 384),
+        )
+        model = torch_core.JEPAModel(jepa_config, device=self._device)
+
+        checkpoint_path = getattr(self, "_checkpoint_path", None) or self.config.pretrained_checkpoint
+        if checkpoint_path:
+            try:
+                model = torch_core.JEPAModel.load(checkpoint_path, device=self._device)
+                logger.info(f"Loaded torch_core checkpoint from {checkpoint_path}")
+            except Exception as e:
+                raise JEPAUnavailableError(
+                    f"Failed to load V-JEPA checkpoint '{checkpoint_path}': {e}. "
+                    "Refusing to fall back to fabricated embeddings."
+                )
+
+        self._model = model
+        self._torch_core = torch_core
+        return model
+
+    @staticmethod
+    def _frames_to_image_list(frames: Any) -> Tuple[List[Any], int]:
+        """Normalize input frames into (list of HxWxC images, batch_size).
+
+        Accepts a list of images, an [T, H, W, C] array (treated as one
+        video/sample), or a [B, T, H, W, C] array (treated as B samples
+        whose frames are mean-pooled).
+        """
+        import numpy as np
+
+        if isinstance(frames, list):
+            arr = np.array(frames)
+        else:
+            arr = np.asarray(frames)
+
+        if arr.ndim == 5:  # [B, T, H, W, C]
+            return [arr[b] for b in range(arr.shape[0])], arr.shape[0]
+        if arr.ndim == 4:  # [T, H, W, C] -> single sample
+            return [arr], 1
+        if arr.ndim == 3:  # [H, W, C] -> single image
+            return [arr[np.newaxis, ...]], 1
+        raise ValueError(
+            f"Unsupported frames shape {arr.shape}; expected [H,W,C], [T,H,W,C] or [B,T,H,W,C]"
+        )
+
     def encode(
         self,
         frames: Any,
         return_all_tokens: bool = False
     ) -> Any:
-        """Encode frames to embeddings."""
+        """Encode frames to embeddings using the real torch_core model.
+
+        Raises :class:`JEPAUnavailableError` when the backend is missing —
+        never returns random/fabricated embeddings.
+        """
         import numpy as np
-        
-        if isinstance(frames, list):
-            frames = np.array(frames)
-        
-        batch_size = frames.shape[0] if len(frames.shape) == 5 else 1
-        
-        embedding_dim = self.config.embedding_dim
-        embeddings = np.random.randn(batch_size, embedding_dim).astype(np.float32)
-        
-        embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-        
+
+        model = self._get_model()
+
+        samples, batch_size = self._frames_to_image_list(frames)
+
+        embeddings = []
+        all_tokens = []
+        for sample in samples:
+            # sample: [T, H, W, C] — embed each frame with the real encoder,
+            # then mean-pool and L2-normalize for the clip embedding.
+            frame_embeddings = [model.embed_image(frame) for frame in sample]
+            clip_embedding = np.mean(np.asarray(frame_embeddings, dtype=np.float32), axis=0)
+            norm = np.linalg.norm(clip_embedding)
+            if norm > 0:
+                clip_embedding = clip_embedding / norm
+            embeddings.append(clip_embedding)
+
+            if return_all_tokens:
+                tokens = model.encode_target(np.asarray(sample))  # [1, N, D]
+                all_tokens.append(np.asarray(tokens)[0])
+
+        embeddings = np.stack(embeddings).astype(np.float32)
+
         if return_all_tokens:
-            T, H, W = self.config.num_frames // 2, 14, 14
-            all_tokens = np.random.randn(batch_size, T * H * W, embedding_dim).astype(np.float32)
-            return embeddings, all_tokens
-        
+            return embeddings, np.stack(all_tokens).astype(np.float32)
+
         return embeddings
     
     def to(self, device: str) -> "VJEPAEncoder":
@@ -901,31 +1002,28 @@ class VJEPAPredictor:
         
         logger.info("Initialized VJEPAPredictor")
     
-    def _build_model(self) -> Dict[str, Any]:
-        """Build the predictor model."""
-        return {
-            "type": "vjepa_predictor",
-            "depth": self.config.predictor_depth,
-            "embed_dim": self.config.predictor_embed_dim,
-            "num_heads": 6,
-            "initialized": True,
-        }
-    
     def predict(
         self,
         context_embeddings: Any,
         context_mask: Any,
         target_mask: Any
     ) -> Any:
-        """Predict target embeddings from context."""
-        import numpy as np
-        
-        batch_size = context_embeddings.shape[0]
-        num_targets = int(target_mask.sum() / batch_size) if target_mask is not None else 196
-        
-        predictions = np.random.randn(batch_size, num_targets, self.config.embedding_dim).astype(np.float32)
-        
-        return predictions
+        """Predict target embeddings from context.
+
+        Requires the torch_core backend. The torch_core contract exposes
+        the predictor only inside ``JEPAModel.train_step`` (end-to-end
+        training); a standalone predictor forward pass is not part of the
+        interface, so instead of fabricating numbers this method raises
+        honestly.
+        """
+        _load_torch_core()  # raises JEPAUnavailableError if backend missing
+
+        raise NotImplementedError(
+            "Standalone predictor forward is not exposed by api.jepa.torch_core. "
+            "Use VJEPAPretrainer.train_epoch(), which runs the real masked "
+            "context->predict->target training step via JEPAModel.train_step(). "
+            "This module never fabricates prediction tensors."
+        )
 
 
 class VJEPAPretrainer:
@@ -948,53 +1046,84 @@ class VJEPAPretrainer:
             for loader in data_loaders
         }
         
-        self._optimizer = None
-        self._scheduler = None
-        self._scaler = None
+        self._model = None  # real torch_core JEPAModel, built lazily
         
         self.training_stats: List[Dict[str, float]] = []
         
         logger.info(f"Initialized VJEPAPretrainer with {len(data_loaders)} data loaders")
     
+    def _get_model(self):
+        """Build (once) the real torch_core JEPAModel, or raise honestly."""
+        if self._model is not None:
+            return self._model
+
+        torch_core = _load_torch_core()
+        jepa_config = torch_core.JEPAConfig()
+        self._model = torch_core.JEPAModel(jepa_config, device="cpu")
+        self._torch_core = torch_core
+        return self._model
+
     def setup_training(self) -> None:
-        """Setup training components."""
-        self.encoder.load_pretrained()
-        self.target_encoder.load_pretrained()
-        
-        logger.info("Training setup complete")
-    
-    def train_epoch(self, epoch: int) -> Dict[str, float]:
-        """Train for one epoch."""
+        """Setup training components (builds the real torch_core model)."""
+        self._get_model()  # raises JEPAUnavailableError if backend missing
+        logger.info("Training setup complete (torch_core backend)")
+
+    def _batch_to_images(self, loader: MiningDataLoader, indices: List[int]) -> Any:
+        """Load real samples and convert to an [B, H, W, C] image batch."""
         import numpy as np
-        
+
+        images = []
+        for idx in indices:
+            sample = loader[idx]
+            frames = np.asarray(sample["frames"])
+            if frames.ndim == 4:
+                # Use the middle frame of the clip as the training image.
+                images.append(frames[frames.shape[0] // 2])
+            elif frames.ndim == 3:
+                images.append(frames)
+            else:
+                raise ValueError(f"Unsupported frame shape {frames.shape} from data loader")
+        return np.stack(images)
+
+    def train_epoch(self, epoch: int) -> Dict[str, float]:
+        """Train for one epoch using the real torch_core training step.
+
+        Every batch loss comes from ``JEPAModel.train_step`` (masked context
+        encoding -> prediction -> smooth-L1 vs EMA target -> backprop).
+        Raises :class:`JEPAUnavailableError` when the backend is missing —
+        the old fabricated ``np.random.uniform * 0.95**epoch`` loss curve
+        has been removed.
+        """
+        model = self._get_model()
+
         epoch_loss = 0.0
         num_batches = 0
-        
+
         for loader in self.data_loaders:
-            masking = self.masking_strategies[loader.imagery_type]
-            
             num_samples = min(len(loader), 100)
-            
+
             for i in range(0, num_samples, self.config.batch_size):
                 batch_indices = list(range(i, min(i + self.config.batch_size, num_samples)))
-                
-                batch_loss = np.random.uniform(0.5, 2.0) * (0.95 ** epoch)
-                
+
+                images = self._batch_to_images(loader, batch_indices)
+                batch_loss = float(model.train_step(images))
+
                 epoch_loss += batch_loss
                 num_batches += 1
-                
+
                 if num_batches % self.config.log_interval == 0:
                     logger.info(f"Epoch {epoch}, Batch {num_batches}, Loss: {batch_loss:.4f}")
-        
+
         avg_loss = epoch_loss / max(num_batches, 1)
-        
+
         stats = {
             "epoch": epoch,
             "loss": avg_loss,
             "num_batches": num_batches,
+            "backend": "torch",
         }
         self.training_stats.append(stats)
-        
+
         return stats
     
     def train(
@@ -1036,6 +1165,11 @@ class VJEPAPretrainer:
         
         with open(checkpoint_path / f"checkpoint_epoch_{epoch}.json", "w") as f:
             json.dump(checkpoint_data, f, indent=2)
+        
+        # Persist real model weights when the torch_core model exists.
+        if self._model is not None:
+            self._model.save(str(checkpoint_path / f"weights_epoch_{epoch}.pt"))
+            logger.info(f"Saved torch_core weights at epoch {epoch}")
         
         logger.info(f"Saved checkpoint at epoch {epoch} to {path}")
     
