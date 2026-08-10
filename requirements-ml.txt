@@ -16,3 +16,9 @@ supervision==0.30.0
 # or SAM3_SERVICE_URL; native sam3 package supported when installed)
 # segment-geospatial==1.1.0   # SAM/SAM2 geospatial helpers (optional)
 # sam3                        # native SAM3 backend (optional; install from vendor source)
+
+# Optional GeoLibre client-side GIS integration (api/innovations/geolibre).
+# ~50MB browser/WASM wheel (MapLibre + DuckDB-WASM + Whitebox tools); the
+# module authors .geolibre.json project documents without it and degrades
+# honestly (built-in MapLibre fallback / explicit 503) when absent.
+# geolibre==2.5.0
