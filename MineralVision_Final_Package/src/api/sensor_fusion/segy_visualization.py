@@ -26,6 +26,14 @@ import base64
 
 logger = logging.getLogger(__name__)
 
+MOCK_FALLBACK_ENV = "MV_ALLOW_MOCK_FALLBACK"
+
+
+def mock_fallback_allowed() -> bool:
+    """True only when MV_ALLOW_MOCK_FALLBACK=true is explicitly set."""
+    import os
+    return os.environ.get(MOCK_FALLBACK_ENV, "").strip().lower() == "true"
+
 
 class ViewType(Enum):
     """Seismic view types."""
@@ -639,61 +647,120 @@ class SEGYViewerIntegration:
         self.viewer = SeismicViewer()
         self.current_file: Optional[str] = None
         
-    def load_segy(self, file_path: str, 
+    def load_segy(self, file_path: str,
                  inline_byte: int = 189,
-                 crossline_byte: int = 193) -> SeismicVolume:
+                 crossline_byte: int = 193,
+                 synthetic: bool = False) -> SeismicVolume:
         """
         Load SEG-Y file into viewer.
-        
+
         Args:
             file_path: Path to SEG-Y file
             inline_byte: Byte position for inline number
             crossline_byte: Byte position for crossline number
-            
+            synthetic: Opt into a synthetic demonstration volume instead of
+                parsing the file (requires MV_ALLOW_MOCK_FALLBACK=true; the
+                volume metadata is tagged synthetic=True)
+
         Returns:
             Loaded SeismicVolume
         """
-        # This would use segyio in production
-        # For now, create a synthetic volume for demonstration
         logger.info(f"Loading SEG-Y file: {file_path}")
-        
-        # Synthetic data for demonstration
-        n_inlines = 100
-        n_crosslines = 150
-        n_samples = 500
-        
-        # Create synthetic seismic data
-        data = np.random.randn(n_inlines, n_crosslines, n_samples).astype(np.float32)
-        
-        # Add some structure
-        for i in range(n_inlines):
-            for j in range(n_crosslines):
-                # Add reflectors
-                data[i, j, 100] += 5.0 * np.sin(i * 0.1 + j * 0.05)
-                data[i, j, 200] += 3.0 * np.cos(i * 0.08 - j * 0.03)
-                data[i, j, 350] += 4.0 * np.sin(i * 0.05 + j * 0.1)
-                
-        volume = SeismicVolume(
-            data=data,
-            inline_range=(1, n_inlines, 1),
-            crossline_range=(1, n_crosslines, 1),
-            sample_interval=4.0,  # 4ms
-            sample_unit="ms",
-            metadata={
-                'file_path': file_path,
-                'inline_byte': inline_byte,
-                'crossline_byte': crossline_byte
-            }
-        )
-        
+
+        if not synthetic:
+            # REAL path: parse the SEG-Y file with segyio
+            try:
+                import segyio  # lazy optional dep
+            except ImportError as e:
+                raise NotImplementedError(
+                    f"Cannot load SEG-Y file '{file_path}': the 'segyio' "
+                    "package is not installed, and this loader never fakes "
+                    "volume data. Remediation: pip install segyio, or call "
+                    "with synthetic=True (requires MV_ALLOW_MOCK_FALLBACK="
+                    "true) for an explicitly synthetic demonstration volume."
+                ) from e
+            if not os.path.exists(file_path):
+                raise FileNotFoundError(f"SEG-Y file not found: {file_path}")
+            with segyio.open(file_path, "r", iline=inline_byte,
+                             xline=crossline_byte, ignore_geometry=False) as f:
+                data = segyio.cube(file_path)
+                # segyio.cube opens with default byte positions; reopen for
+                # header-derived ranges
+                il = f.ilines
+                xl = f.xlines
+                sample_interval = float(f.bin[segyio.BinField.Interval]) / 1000.0
+            volume = SeismicVolume(
+                data=np.asarray(data, dtype=np.float32),
+                inline_range=(int(il[0]), int(il[-1]), 1),
+                crossline_range=(int(xl[0]), int(xl[-1]), 1),
+                sample_interval=sample_interval,
+                sample_unit="ms",
+                metadata={
+                    'file_path': file_path,
+                    'inline_byte': inline_byte,
+                    'crossline_byte': crossline_byte,
+                    'synthetic': False,
+                }
+            )
+        else:
+            volume = make_synthetic_volume(
+                file_path=file_path, inline_byte=inline_byte,
+                crossline_byte=crossline_byte)
+
         self.viewer.load_volume(volume)
         self.current_file = file_path
-        
         return volume
-        
+
+
     def get_viewer(self) -> SeismicViewer:
         """Get the viewer instance."""
         return self.viewer
+
+
+def make_synthetic_volume(n_inlines: int = 100,
+                          n_crosslines: int = 150,
+                          n_samples: int = 500,
+                          seed: Optional[int] = None,
+                          **metadata_extra: Any) -> SeismicVolume:
+    """
+    Build an explicitly SYNTHETIC demonstration seismic volume.
+
+    Requires MV_ALLOW_MOCK_FALLBACK=true (global fabrication policy); the
+    returned volume's metadata carries ``synthetic: True``. Callers must opt
+    in — ``load_segy`` never calls this unless ``synthetic=True``.
+    """
+    if not mock_fallback_allowed():
+        raise RuntimeError(
+            "make_synthetic_volume fabricates demonstration data and is only "
+            "allowed when MV_ALLOW_MOCK_FALLBACK=true. Refusing to fabricate "
+            "a volume."
+        )
+    logger.warning(
+        "MV DEGRADED MODE: generating SYNTHETIC seismic volume because "
+        "%s=true — not real SEG-Y data.", MOCK_FALLBACK_ENV,
+    )
+    rng = np.random.default_rng(seed)
+    data = rng.standard_normal((n_inlines, n_crosslines, n_samples)).astype(np.float32)
+
+    # Add some structure (deterministic reflectors)
+    for i in range(n_inlines):
+        for j in range(n_crosslines):
+            data[i, j, 100] += 5.0 * np.sin(i * 0.1 + j * 0.05)
+            data[i, j, 200] += 3.0 * np.cos(i * 0.08 - j * 0.03)
+            data[i, j, 350] += 4.0 * np.sin(i * 0.05 + j * 0.1)
+
+    metadata = {'synthetic': True}
+    metadata.update(metadata_extra)
+    return SeismicVolume(
+        data=data,
+        inline_range=(1, n_inlines, 1),
+        crossline_range=(1, n_crosslines, 1),
+        sample_interval=4.0,  # 4ms
+        sample_unit="ms",
+        metadata=metadata,
+    )
+
+
 
 
 def create_segy_viewer() -> SEGYViewerIntegration:
