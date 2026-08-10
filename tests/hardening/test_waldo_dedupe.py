@@ -58,25 +58,35 @@ def test_molmo_fusion_imports_canonical_primitives():
     assert "WALDODetector" in source
 
 
-def test_jepa_detection_returns_nothing_without_detector():
-    """No fabricated detections when canonical detector unavailable."""
+def test_jepa_detection_returns_nothing_without_detector(monkeypatch):
+    """No fabricated detections when canonical detector unavailable.
+
+    Post-decon contract: without a loadable RF-DETR and without a configured
+    WALDO_SERVICE_URL, detection raises an honest WaldoIntegrationUnavailable
+    instead of returning random or silently empty results.
+    """
+    import pytest
+
     from src.api.jepa.vjepa_integration import create_feature_extractor
     from src.api.jepa.waldo_sam3_integration import (
         DetectionTarget,
         WALDOJEPAIntegration,
+        WaldoIntegrationUnavailable,
     )
 
+    monkeypatch.delenv("WALDO_SERVICE_URL", raising=False)
     extractor = create_feature_extractor()
     integration = WALDOJEPAIntegration(
         jepa_extractor=extractor,
         detection_targets=[DetectionTarget.EQUIPMENT],
     )
-    # heavy ML stack (torch/ultralytics) is not installed in this env
+    # heavy ML stack (ultralytics) is not installed in this env
     integration.load_waldo_model()
     assert integration._waldo_model is None
 
     frame = np.zeros((64, 64, 3), dtype=np.uint8)
-    assert integration._run_waldo_detection(frame, 0.5) == []
+    with pytest.raises(WaldoIntegrationUnavailable):
+        integration._run_waldo_detection(frame, 0.5)
 
 
 def test_molmo_detection_returns_nothing_without_detector():

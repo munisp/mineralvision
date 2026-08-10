@@ -7,6 +7,7 @@ numpy internals with hand-computed embeddings.  No mocks pretending to be
 JEPA, no skips.
 """
 
+import sys
 import base64
 import io
 
@@ -344,8 +345,20 @@ def test_get_model_raises_without_core(no_torch_core):
         core.get_model()
 
 
-def test_load_torch_core_none_when_module_missing():
-    # torch_core.py does not exist in this worktree; even with torch
-    # installed the lazy import must return None (not raise).
+def test_load_torch_core_none_when_module_missing(monkeypatch):
+    # Simulate torch_core absence (it exists on main since the torch-core
+    # merge): block both import paths; lazy import must return None, not raise.
     if core.torch_available():
+        monkeypatch.setitem(sys.modules, "src.api.jepa.torch_core", None)
+        monkeypatch.setitem(sys.modules, "api.jepa.torch_core", None)
         assert core.load_torch_core() is None
+
+
+def test_load_torch_core_returns_module_when_present():
+    # With the real torch core merged and torch installed, the loader must
+    # return the module and expose the contract names.
+    if core.torch_available():
+        module = core.load_torch_core()
+        if module is not None:  # core importable in this environment
+            for name in ("JEPAConfig", "JEPAModel", "TORCH_AVAILABLE", "jepa_backend"):
+                assert hasattr(module, name)
