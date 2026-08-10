@@ -18,11 +18,16 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-try:  # dual-context import
+# Dual-context import: bind to the SAME module instance (``api.*`` vs
+# ``src.api.*``) as the consuming application — selecting by our own package
+# name, NOT by import order. Importing the other context would create a
+# second ``database`` module instance whose ``get_db``/engine differ from the
+# app's (breaks dependency overrides and DB sessions in mixed suites).
+if __package__ and __package__.startswith("src."):  # src.api.innovations.geolibre
     from src.api.database import get_db
     from src.api.innovations.geolibre import project_builder as pb
     from src.api.innovations.geolibre import service
-except ImportError:  # pragma: no cover
+else:  # api.innovations.geolibre (MineralVision_Final_Package/src on sys.path)
     from api.database import get_db
     from api.innovations.geolibre import project_builder as pb
     from api.innovations.geolibre import service

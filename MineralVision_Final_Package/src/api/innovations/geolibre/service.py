@@ -15,10 +15,12 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy.orm import Session
 
-try:  # dual-context import
+# Dual-context import: bind by our own package name, NOT import order (see
+# routes.py note) so models match the app's ``database`` module instance.
+if __package__ and __package__.startswith("src."):  # src.api.innovations.geolibre
     from src.api.database import DrillholeModel, ProjectModel, SampleModel
     from src.api.innovations.geolibre import project_builder as pb
-except ImportError:  # pragma: no cover
+else:  # api.innovations.geolibre (MineralVision_Final_Package/src on sys.path)
     from api.database import DrillholeModel, ProjectModel, SampleModel
     from api.innovations.geolibre import project_builder as pb
 
