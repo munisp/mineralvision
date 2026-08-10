@@ -502,7 +502,107 @@ class RoleManager:
             permissions=qp_permissions,
             is_system_role=True
         )
-    
+
+        # --- Stakeholder onboarding roles (wave 6) -------------------------
+        field_technician_permissions = [
+            Permission_(
+                name="field_project_access",
+                resource_type=ResourceType.PROJECT,
+                actions={Permission.READ}
+            ),
+            Permission_(
+                name="field_drillhole_access",
+                resource_type=ResourceType.DRILLHOLE,
+                actions={Permission.READ}
+            ),
+            Permission_(
+                name="field_sample_access",
+                resource_type=ResourceType.SAMPLE,
+                actions={Permission.READ, Permission.WRITE, Permission.IMPORT}
+            ),
+            Permission_(
+                name="field_assay_access",
+                resource_type=ResourceType.ASSAY,
+                actions={Permission.READ, Permission.IMPORT}
+            ),
+        ]
+
+        self.roles["field_technician"] = Role(
+            id="field_technician",
+            name="Field Technician",
+            description="Field data capture: collect/import samples, read project context",
+            permissions=field_technician_permissions,
+            is_system_role=True
+        )
+
+        investor_permissions = [
+            Permission_(
+                name="investor_view_access",
+                resource_type=rt,
+                actions={Permission.READ}
+            )
+            for rt in [ResourceType.PROJECT, ResourceType.RESOURCE_ESTIMATE,
+                      ResourceType.REPORT, ResourceType.BLOCK_MODEL]
+        ]
+
+        self.roles["investor"] = Role(
+            id="investor",
+            name="Investor",
+            description="Read-only access to projects, resource estimates and reports",
+            permissions=investor_permissions,
+            is_system_role=True
+        )
+
+        regulator_permissions = [
+            Permission_(
+                name="regulator_view_access",
+                resource_type=rt,
+                actions={Permission.READ, Permission.AUDIT}
+            )
+            for rt in [ResourceType.PROJECT, ResourceType.RESOURCE_ESTIMATE,
+                      ResourceType.REPORT, ResourceType.QAQC, ResourceType.AUDIT_LOG]
+        ] + [
+            Permission_(
+                name="regulator_export_access",
+                resource_type=ResourceType.REPORT,
+                actions={Permission.READ, Permission.AUDIT, Permission.EXPORT}
+            )
+        ]
+
+        self.roles["regulator"] = Role(
+            id="regulator",
+            name="Regulator",
+            description="Oversight access: read + audit trail + report export",
+            permissions=regulator_permissions,
+            is_system_role=True
+        )
+
+        custodian_permissions = [
+            Permission_(
+                name="custodian_sample_access",
+                resource_type=ResourceType.SAMPLE,
+                actions={Permission.READ, Permission.WRITE, Permission.SHARE}
+            ),
+            Permission_(
+                name="custodian_assay_access",
+                resource_type=ResourceType.ASSAY,
+                actions={Permission.READ}
+            ),
+            Permission_(
+                name="custodian_audit_access",
+                resource_type=ResourceType.AUDIT_LOG,
+                actions={Permission.READ, Permission.AUDIT}
+            ),
+        ]
+
+        self.roles["custodian"] = Role(
+            id="custodian",
+            name="Custodian",
+            description="Chain-of-custody: manage sample custody and audit trail",
+            permissions=custodian_permissions,
+            is_system_role=True
+        )
+
     def get_role(self, role_id: str) -> Optional[Role]:
         """Get role by ID."""
         return self.roles.get(role_id)
