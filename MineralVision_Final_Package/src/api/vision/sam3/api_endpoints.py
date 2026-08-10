@@ -1,14 +1,27 @@
 """
 SAM3 API Endpoints for MineralVision
 
+SAM3-ready HTTP interface; the current loadable backend is an ultralytics
+SAM/SAM2 checkpoint or a remote service via ``SAM3_SERVICE_URL``.  The
+native ``sam3`` package is supported when installed.
+
 FastAPI endpoints for:
 - Image segmentation (text, exemplar, point prompts)
 - Video tracking
 - Fine-tuning job management
 - Model/adapter management
+
+Honesty contract:
+- ``/segment/*`` return 503 with remediation text when no SAM backend is
+  available; a per-request ``allow_empty_fallback=true`` opt-in returns the
+  labelled mock (``metadata.mock = true``) for UI development.
+- Real-inference exceptions surface as 500 with the error detail.
+- ``/training/start`` returns 503 when the training backend is unavailable
+  unless ``MV_ALLOW_MOCK_FALLBACK=true`` (no-op fallback, no metrics).
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import tempfile
@@ -136,11 +149,44 @@ def get_registry():
 
 # Segmentation Endpoints
 
+def _segment_or_503(call, fallback_concept: str, prompt_type: str,
+                    allow_empty_fallback: bool):
+    """Run a real segmentation call.
+
+    Backend unavailable -> 503 with remediation text, unless the caller
+    explicitly opted into the labelled empty fallback (UI development).
+    Real-inference exceptions propagate (mapped to 500 by the endpoint).
+    """
+    from .sam3_segmenter import SAM3UnavailableError
+    try:
+        return call()
+    except SAM3UnavailableError as exc:
+        if allow_empty_fallback:
+            logger.warning("allow_empty_fallback=true: returning labelled "
+                           "empty mock result (UI development only)")
+            return get_segmenter()._mock_segment(fallback_concept,
+                                                 prompt_type)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+def _parse_form_model(payload: str, model, name: str):
+    """Parse a JSON-encoded form field into a Pydantic model (a JSON body
+    cannot be combined with multipart file uploads in one request)."""
+    try:
+        return model.model_validate_json(payload)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"invalid JSON for form field '{name}': {exc}") from exc
+
+
 @router.post("/segment/text", response_model=SegmentationResponse)
 async def segment_by_text(
-    request: TextSegmentationRequest,
-    image: UploadFile = File(..., description="Image to segment")
+    image: UploadFile = File(..., description="Image to segment"),
+    request: str = Form(..., description="JSON-encoded TextSegmentationRequest"),
+    allow_empty_fallback: bool = False
 ):
+    request = _parse_form_model(request, TextSegmentationRequest, "request")
     """
     Segment image using text prompt.
     
@@ -168,13 +214,19 @@ async def segment_by_text(
             tmp.write(image_data)
             tmp_path = tmp.name
         
-        # Perform segmentation
-        result = segmenter.segment_by_text(
-            image=tmp_path,
-            text_prompt=request.text_prompt,
-            concept=request.concept
+        # Perform segmentation (503 when backend unavailable, 500 on
+        # real-inference error, labelled mock only when opted in)
+        result = _segment_or_503(
+            lambda: segmenter.segment_by_text(
+                image=tmp_path,
+                text_prompt=request.text_prompt,
+                concept=request.concept
+            ),
+            fallback_concept=request.concept or request.text_prompt,
+            prompt_type="text",
+            allow_empty_fallback=allow_empty_fallback,
         )
-        
+
         # Clean up temp file
         Path(tmp_path).unlink(missing_ok=True)
         
@@ -202,6 +254,8 @@ async def segment_by_text(
             masks_base64=masks_base64,
             metadata=result.metadata
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Text segmentation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -209,9 +263,11 @@ async def segment_by_text(
 
 @router.post("/segment/point", response_model=SegmentationResponse)
 async def segment_by_point(
-    request: PointSegmentationRequest,
-    image: UploadFile = File(..., description="Image to segment")
+    image: UploadFile = File(..., description="Image to segment"),
+    request: str = Form(..., description="JSON-encoded PointSegmentationRequest"),
+    allow_empty_fallback: bool = False
 ):
+    request = _parse_form_model(request, PointSegmentationRequest, "request")
     """
     Segment image using point prompts.
     
@@ -230,13 +286,18 @@ async def segment_by_point(
         
         # Convert points
         points = [(p["x"], p["y"]) for p in request.points]
-        
-        result = segmenter.segment_by_point(
-            image=tmp_path,
-            points=points,
-            labels=request.labels
+
+        result = _segment_or_503(
+            lambda: segmenter.segment_by_point(
+                image=tmp_path,
+                points=points,
+                labels=request.labels
+            ),
+            fallback_concept="point",
+            prompt_type="point",
+            allow_empty_fallback=allow_empty_fallback,
         )
-        
+
         Path(tmp_path).unlink(missing_ok=True)
         
         return SegmentationResponse(
@@ -247,6 +308,8 @@ async def segment_by_point(
             prompt_type=result.prompt_type,
             metadata=result.metadata
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Point segmentation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -254,10 +317,12 @@ async def segment_by_point(
 
 @router.post("/segment/exemplar", response_model=SegmentationResponse)
 async def segment_by_exemplar(
-    request: ExemplarSegmentationRequest,
     image: UploadFile = File(..., description="Target image to segment"),
-    exemplar: UploadFile = File(..., description="Exemplar image showing target concept")
+    exemplar: UploadFile = File(..., description="Exemplar image showing target concept"),
+    request: str = Form(..., description="JSON-encoded ExemplarSegmentationRequest"),
+    allow_empty_fallback: bool = False
 ):
+    request = _parse_form_model(request, ExemplarSegmentationRequest, "request")
     """
     Segment image using exemplar image prompt.
     
@@ -284,12 +349,17 @@ async def segment_by_exemplar(
         if request.exemplar_box and len(request.exemplar_box) == 4:
             exemplar_box = tuple(request.exemplar_box)
         
-        result = segmenter.segment_by_exemplar(
-            image=image_path,
-            exemplar_image=exemplar_path,
-            exemplar_box=exemplar_box
+        result = _segment_or_503(
+            lambda: segmenter.segment_by_exemplar(
+                image=image_path,
+                exemplar_image=exemplar_path,
+                exemplar_box=exemplar_box
+            ),
+            fallback_concept="exemplar",
+            prompt_type="exemplar",
+            allow_empty_fallback=allow_empty_fallback,
         )
-        
+
         Path(image_path).unlink(missing_ok=True)
         Path(exemplar_path).unlink(missing_ok=True)
         
@@ -301,6 +371,8 @@ async def segment_by_exemplar(
             prompt_type=result.prompt_type,
             metadata=result.metadata
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Exemplar segmentation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -364,10 +436,26 @@ async def start_training_job(
     - lora: Parameter-efficient LoRA fine-tuning (recommended)
     - full: Full model fine-tuning (requires more resources)
     - adapter: Adapter-based fine-tuning
+
+    Returns 503 with remediation text when the training backend
+    (PyTorch) is unavailable, unless MV_ALLOW_MOCK_FALLBACK=true selects
+    the labelled no-op fallback (status + message only, no metrics).
     """
+    from .fine_tuning import TORCH_AVAILABLE
+    if not TORCH_AVAILABLE and \
+            os.getenv("MV_ALLOW_MOCK_FALLBACK", "").lower() != "true":
+        raise HTTPException(
+            status_code=503,
+            detail="Training backend unavailable: PyTorch is not "
+                   "installed. Remediate by installing "
+                   "requirements-ml.txt (torch, ultralytics SAM/SAM2 "
+                   "checkpoint) or pointing SAM3_SERVICE_URL at a "
+                   "training service. For UI development only, set "
+                   "MV_ALLOW_MOCK_FALLBACK=true.")
     try:
-        from .fine_tuning import SAM3FineTuner, TrainingConfig, TrainingStrategy, GeologyDatasetConfig
-        from .data_preparation import GeologySegmentationDataset
+        from .fine_tuning import (SAM3FineTuner, TrainingConfig,
+                                  TrainingStrategy, GeologyDatasetConfig,
+                                  GeologySegmentationDataset)
         import uuid
         
         job_id = f"train_{uuid.uuid4().hex[:8]}"
@@ -426,6 +514,8 @@ async def start_training_job(
             message="Training job started",
             config=config.to_dict()
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to start training job: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -613,14 +703,32 @@ async def delete_adapter(adapter_id: str):
 
 @router.get("/health")
 async def health_check():
-    """Check SAM3 service health."""
+    """Check SAM3 service health — reports backend availability truthfully.
+
+    ``sam3_available`` is True only when an inference backend can actually
+    be loaded by this process (currently the native ``sam3`` package; an
+    ultralytics SAM/SAM2 checkpoint or ``SAM3_SERVICE_URL`` backend is
+    reported via informational fields); it is never inferred from a mock
+    fallback.
+    """
     try:
         from .sam3_segmenter import SAM3_AVAILABLE, TORCH_AVAILABLE
-        
+        from .fine_tuning import TORCH_AVAILABLE as TRAIN_TORCH_AVAILABLE
+
+        service_url = os.getenv("SAM3_SERVICE_URL") or None
+        checkpoint = os.getenv("SAM3_CHECKPOINT_PATH") or None
+        backend_available = bool(SAM3_AVAILABLE)
+
         return {
-            "status": "healthy",
-            "sam3_available": SAM3_AVAILABLE,
+            "status": "healthy" if backend_available else "degraded",
+            "sam3_available": backend_available,
+            "native_sam3_package": SAM3_AVAILABLE,
             "torch_available": TORCH_AVAILABLE,
+            "training_backend_available": TRAIN_TORCH_AVAILABLE,
+            "service_url_configured": service_url is not None,
+            "checkpoint_configured": checkpoint is not None,
+            "mock_fallback_enabled":
+                os.getenv("MV_ALLOW_MOCK_FALLBACK", "").lower() == "true",
             "adapters_registered": len(get_registry()._adapters) if get_registry() else 0
         }
     except Exception as e:

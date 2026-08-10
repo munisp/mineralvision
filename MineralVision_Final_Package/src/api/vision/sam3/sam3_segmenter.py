@@ -1,14 +1,24 @@
 """
 SAM3 Segmenter for MineralVision
 
-Meta's Segment Anything Model 3 integration for geology, mining, 
-geospatial, and geophysics applications.
+SAM3-ready segmentation interface for geology, mining, geospatial, and
+geophysics applications.  The current loadable backend is an ultralytics
+SAM/SAM2 checkpoint or a remote service via ``SAM3_SERVICE_URL``; the
+native ``sam3`` package is supported when installed.
 
 Features:
 - Text-based concept segmentation
 - Image exemplar prompts
 - Video tracking
 - Domain-specific fine-tuning support
+
+Honesty contract: when no segmentation backend is available,
+``initialize()`` returns False and inference raises
+``SAM3UnavailableError`` so the API layer can answer 503 with remediation
+text.  Real-inference exceptions propagate to the caller.  The labelled
+empty fallback (``_mock_segment``) is only invoked by the API layer under
+an explicit per-request opt-in (``allow_empty_fallback=true``) for UI
+development.
 """
 
 import logging
@@ -37,7 +47,24 @@ try:
     SAM3_AVAILABLE = True
 except ImportError:
     SAM3_AVAILABLE = False
-    logger.info("SAM3 not installed. Install with: pip install sam3")
+    logger.info("SAM3 backend not installed (native sam3 package or "
+                "ultralytics SAM/SAM2).")
+
+
+class SAM3UnavailableError(RuntimeError):
+    """Raised when segmentation is requested but no SAM backend is
+    available.  The API layer maps this to HTTP 503 with remediation
+    text."""
+
+    def __init__(self, feature: str = "segmentation"):
+        super().__init__(
+            f"SAM backend unavailable for {feature}: neither the native "
+            f"sam3 package nor an ultralytics SAM/SAM2 checkpoint nor "
+            f"SAM3_SERVICE_URL is configured. "
+            f"Remediate by installing requirements-ml.txt and mounting a "
+            f"SAM/SAM2 checkpoint (SAM3_CHECKPOINT_PATH), setting "
+            f"SAM3_SERVICE_URL, or installing the sam3 package. "
+            f"For UI development only, pass allow_empty_fallback=true.")
 
 
 class Modality(str, Enum):
@@ -658,33 +685,35 @@ class SAM3Segmenter:
         self.modality = modality
         self.predictor = None
         self._initialized = False
-        
+
         if not SAM3_AVAILABLE:
-            logger.warning("SAM3 not available. Using mock segmenter.")
-        
+            logger.warning("No SAM backend available; inference will raise "
+                           "SAM3UnavailableError (API answers 503).")
+
     def initialize(self) -> bool:
-        """Initialize the SAM3 model."""
+        """Initialize the SAM backend.  Returns False when unavailable."""
         if not SAM3_AVAILABLE:
-            logger.info("SAM3 not installed. Segmentation will return default results.")
-            self._initialized = True
-            return True
-            
+            logger.info("SAM backend not installed; segmenter stays "
+                        "uninitialized.")
+            self._initialized = False
+            return False
+
         try:
             if self.model_path and Path(self.model_path).exists():
                 self.predictor = build_sam3(checkpoint=self.model_path)
             else:
                 self.predictor = build_sam3()
-                
+
             if self.adapter_path and Path(self.adapter_path).exists():
                 self._load_adapter(self.adapter_path)
-                
+
             self.predictor.to(self.device)
             self._initialized = True
             logger.info("SAM3 initialized successfully")
             return True
         except Exception as e:
             logger.error(f"Failed to initialize SAM3: {e}")
-            self._initialized = True
+            self._initialized = False
             return False
     
     def _load_adapter(self, adapter_path: str) -> None:
@@ -728,35 +757,32 @@ class SAM3Segmenter:
             prompts = [text_prompt]
         
         if not SAM3_AVAILABLE or self.predictor is None:
-            return self._mock_segment(prompts[0], "text")
-            
-        try:
-            if isinstance(image, (str, Path)):
-                image = np.array(Image.open(image))
-                
-            self.predictor.set_image(image)
-            
-            all_masks = []
-            all_scores = []
-            
-            for prompt in prompts:
-                masks, scores, _ = self.predictor.predict(
-                    text_prompt=prompt,
-                    multimask_output=True
-                )
-                all_masks.extend(masks)
-                all_scores.extend(scores.tolist())
-            
-            return SegmentationResult(
-                masks=all_masks,
-                scores=all_scores,
-                concept=concept or text_prompt,
-                prompt_type="text",
-                metadata={"prompts": prompts}
+            raise SAM3UnavailableError("text segmentation")
+
+        # Real-inference exceptions propagate to the caller (API -> 500).
+        if isinstance(image, (str, Path)):
+            image = np.array(Image.open(image))
+
+        self.predictor.set_image(image)
+
+        all_masks = []
+        all_scores = []
+
+        for prompt in prompts:
+            masks, scores, _ = self.predictor.predict(
+                text_prompt=prompt,
+                multimask_output=True
             )
-        except Exception as e:
-            logger.error(f"Segmentation failed: {e}")
-            return self._mock_segment(text_prompt, "text")
+            all_masks.extend(masks)
+            all_scores.extend(scores.tolist())
+
+        return SegmentationResult(
+            masks=all_masks,
+            scores=all_scores,
+            concept=concept or text_prompt,
+            prompt_type="text",
+            metadata={"prompts": prompts}
+        )
     
     def segment_by_exemplar(
         self,
@@ -781,33 +807,30 @@ class SAM3Segmenter:
             self.initialize()
             
         if not SAM3_AVAILABLE or self.predictor is None:
-            return self._mock_segment("exemplar", "exemplar")
-            
-        try:
-            if isinstance(image, (str, Path)):
-                image = np.array(Image.open(image))
-            if isinstance(exemplar_image, (str, Path)):
-                exemplar_image = np.array(Image.open(exemplar_image))
-                
-            self.predictor.set_image(image)
-            
-            masks, scores, _ = self.predictor.predict(
-                exemplar_image=exemplar_image,
-                exemplar_mask=exemplar_mask,
-                exemplar_box=exemplar_box,
-                multimask_output=True
-            )
-            
-            return SegmentationResult(
-                masks=list(masks),
-                scores=scores.tolist(),
-                concept="exemplar_match",
-                prompt_type="exemplar",
-                metadata={"has_mask": exemplar_mask is not None, "has_box": exemplar_box is not None}
-            )
-        except Exception as e:
-            logger.error(f"Exemplar segmentation failed: {e}")
-            return self._mock_segment("exemplar", "exemplar")
+            raise SAM3UnavailableError("exemplar segmentation")
+
+        # Real-inference exceptions propagate to the caller (API -> 500).
+        if isinstance(image, (str, Path)):
+            image = np.array(Image.open(image))
+        if isinstance(exemplar_image, (str, Path)):
+            exemplar_image = np.array(Image.open(exemplar_image))
+
+        self.predictor.set_image(image)
+
+        masks, scores, _ = self.predictor.predict(
+            exemplar_image=exemplar_image,
+            exemplar_mask=exemplar_mask,
+            exemplar_box=exemplar_box,
+            multimask_output=True
+        )
+
+        return SegmentationResult(
+            masks=list(masks),
+            scores=scores.tolist(),
+            concept="exemplar_match",
+            prompt_type="exemplar",
+            metadata={"has_mask": exemplar_mask is not None, "has_box": exemplar_box is not None}
+        )
     
     def segment_by_point(
         self,
@@ -830,33 +853,30 @@ class SAM3Segmenter:
             self.initialize()
             
         if not SAM3_AVAILABLE or self.predictor is None:
-            return self._mock_segment("point", "point")
-            
-        try:
-            if isinstance(image, (str, Path)):
-                image = np.array(Image.open(image))
-                
-            self.predictor.set_image(image)
-            
-            point_coords = np.array(points)
-            point_labels = np.array(labels)
-            
-            masks, scores, _ = self.predictor.predict(
-                point_coords=point_coords,
-                point_labels=point_labels,
-                multimask_output=True
-            )
-            
-            return SegmentationResult(
-                masks=list(masks),
-                scores=scores.tolist(),
-                concept="point_selection",
-                prompt_type="point",
-                metadata={"point_count": len(points)}
-            )
-        except Exception as e:
-            logger.error(f"Point segmentation failed: {e}")
-            return self._mock_segment("point", "point")
+            raise SAM3UnavailableError("point segmentation")
+
+        # Real-inference exceptions propagate to the caller (API -> 500).
+        if isinstance(image, (str, Path)):
+            image = np.array(Image.open(image))
+
+        self.predictor.set_image(image)
+
+        point_coords = np.array(points)
+        point_labels = np.array(labels)
+
+        masks, scores, _ = self.predictor.predict(
+            point_coords=point_coords,
+            point_labels=point_labels,
+            multimask_output=True
+        )
+
+        return SegmentationResult(
+            masks=list(masks),
+            scores=scores.tolist(),
+            concept="point_selection",
+            prompt_type="point",
+            metadata={"point_count": len(points)}
+        )
     
     def get_concepts_for_modality(self, modality: Optional[Modality] = None) -> List[GeologyConcept]:
         """Get available concepts for a modality."""
@@ -864,7 +884,12 @@ class SAM3Segmenter:
         return [c for c in GEOLOGY_CONCEPTS.values() if c.modality == mod]
     
     def _mock_segment(self, concept: str, prompt_type: str) -> SegmentationResult:
-        """Return default result when SAM3 not available."""
+        """Labelled empty fallback for UI development.
+
+        Only reachable via the API layer under an explicit per-request
+        ``allow_empty_fallback=true`` opt-in; always carries
+        ``metadata.mock = True``.
+        """
         return SegmentationResult(
             masks=[],
             scores=[],
@@ -893,11 +918,11 @@ class SAM3VideoTracker:
         self._initialized = False
         
     def initialize(self) -> bool:
-        """Initialize the video predictor."""
+        """Initialize the video predictor.  Returns False when unavailable."""
         if not SAM3_AVAILABLE:
-            self._initialized = True
-            return True
-            
+            self._initialized = False
+            return False
+
         try:
             if self.model_path:
                 self.predictor = SAM3VideoPredictor(checkpoint=self.model_path)
@@ -908,7 +933,7 @@ class SAM3VideoTracker:
             return True
         except Exception as e:
             logger.error(f"Failed to initialize video tracker: {e}")
-            self._initialized = True
+            self._initialized = False
             return False
     
     def track_concept(

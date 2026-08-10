@@ -1,8 +1,13 @@
 """
 SAM3 Integration for MineralVision
 
-Meta's Segment Anything Model 3 integration for geology, mining,
-geospatial, and geophysics applications.
+SAM3-ready segmentation interface for geology, mining, geospatial, and
+geophysics applications.  The current loadable backend is an ultralytics
+SAM/SAM2 checkpoint or a remote service via ``SAM3_SERVICE_URL``; the
+native ``sam3`` package is supported when installed.
+
+The FastAPI ``router`` (prefix ``/api/v1/sam3``) is exported here for the
+platform orchestrator to mount; ``main.py`` is not edited by this package.
 
 Modules:
 - sam3_segmenter: Core segmentation functionality
@@ -104,7 +109,13 @@ from .weak_supervision import (
     create_weak_supervision_pipeline,
 )
 
+# FastAPI router (prefix /api/v1/sam3) — mounted by the platform
+# orchestrator in main.py.
+from .api_endpoints import router
+
 __all__ = [
+    # Router
+    "router",
     # Segmenter
     "SAM3Segmenter",
     "SAM3VideoTracker",

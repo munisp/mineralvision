@@ -1,15 +1,27 @@
 """
 SAM3 Fine-Tuning Pipeline for Geology/Mining Domains
 
+SAM3-ready interface; the current loadable backend is an ultralytics
+SAM/SAM2 checkpoint or a remote service via ``SAM3_SERVICE_URL``.  The
+native ``sam3`` package is supported when installed.
+
 Provides:
 - LoRA/Adapter-based parameter-efficient fine-tuning
 - Domain-specific dataset preparation
 - Training configuration management
 - Model versioning and artifact management
+
+Honesty contract: when the real training backend (PyTorch) is unavailable,
+``train()`` raises ``RuntimeError`` so the API layer can answer 503 with
+remediation text.  A labelled no-op fallback (``_mock_train``) exists only
+for UI development and runs solely under the environment flag
+``MV_ALLOW_MOCK_FALLBACK=true``; it emits status + message only, never
+fabricated metrics.
 """
 
 import logging
 import json
+import os
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from enum import Enum
@@ -456,7 +468,15 @@ class SAM3FineTuner:
             Training results dictionary
         """
         if not TORCH_AVAILABLE:
-            return self._mock_train(train_dataset)
+            if os.getenv("MV_ALLOW_MOCK_FALLBACK", "").lower() == "true":
+                return self._mock_train(train_dataset)
+            raise RuntimeError(
+                "Training backend unavailable: PyTorch is not installed. "
+                "Remediate by installing requirements-ml.txt (torch, "
+                "ultralytics SAM/SAM2 checkpoint) or pointing "
+                "SAM3_SERVICE_URL at a training service. "
+                "For UI development only, set MV_ALLOW_MOCK_FALLBACK=true "
+                "to enable a labelled no-op fallback.")
             
         if self.model is None:
             self.setup_model()
@@ -658,13 +678,17 @@ class SAM3FineTuner:
         return str(output_path)
     
     def _mock_train(self, dataset: GeologySegmentationDataset) -> Dict[str, Any]:
-        """Mock training when dependencies unavailable."""
+        """Labelled no-op fallback for UI development.
+
+        Only reachable when ``MV_ALLOW_MOCK_FALLBACK=true`` (enforced in
+        ``train()``).  Emits status + message only — never fabricated
+        metrics.
+        """
         return {
             "status": "mock",
-            "message": "PyTorch/SAM3 not available. Training simulated.",
-            "epochs": self.config.num_epochs,
-            "examples": len(dataset),
-            "final_loss": 0.05
+            "message": "Training backend unavailable (PyTorch/SAM3 not "
+                       "installed). No training was performed; this is a "
+                       "labelled no-op fallback for UI development."
         }
 
 
