@@ -28,11 +28,22 @@ from .models import (
 )
 
 # Dual-context import of the platform database + auth helpers.
-try:  # running inside the FastAPI package layout (src/ on sys.path)
+# CRITICAL: auth_middleware holds the JWT signing secret at module level, so we
+# must bind to WHICHEVER module instance is already loaded (``api.*`` vs
+# ``src.api.*``) — importing the other context would create a second instance
+# with a different ephemeral secret and every token would fail validation.
+# Dual-context import of the platform database + auth helpers.
+# CRITICAL: auth_middleware holds the JWT signing secret at module level, so we
+# must bind to the SAME module instance (``api.*`` vs ``src.api.*``) as the
+# consuming application — importing the other context would create a second
+# instance with a different ephemeral secret and tokens would fail validation.
+# We select the context from our own package name (i.e. how the app imported
+# this innovation), NOT from import order.
+if __package__ and __package__.startswith("src."):  # src.api.innovations.onboarding
     from src.api.auth_middleware import TokenPayload, hash_password, require_auth
     from src.api.database import UserModel
     from src.api.database import get_db as platform_get_db
-except ImportError:  # running with MineralVision_Final_Package/src on sys.path
+else:  # api.innovations.onboarding (MineralVision_Final_Package/src on sys.path)
     from api.auth_middleware import TokenPayload, hash_password, require_auth
     from api.database import UserModel
     from api.database import get_db as platform_get_db

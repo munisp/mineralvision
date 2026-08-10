@@ -33,7 +33,7 @@ rbac_manager = create_rbac_manager()
 
 # Roles valid for assignment: the RoleManager catalogue plus the legacy
 # self-registered "user" role. Unknown roles are rejected with 422.
-VALID_ROLES = set(rbac_manager.roles.keys()) | {"user"}
+VALID_ROLES = set(rbac_manager.system.role_manager.roles.keys()) | {"user"}
 
 
 def _validate_roles(roles: list) -> None:
