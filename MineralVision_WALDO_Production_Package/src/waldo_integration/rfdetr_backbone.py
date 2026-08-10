@@ -55,6 +55,15 @@ except ImportError:
     SUPERVISION_AVAILABLE = False
 
 
+class RFDETRUnavailableError(RuntimeError):
+    """Raised when the real RF-DETR backend is unavailable and the mock
+    fallback has not been explicitly allowed via MV_ALLOW_MOCK_FALLBACK=true."""
+
+
+def _mock_fallback_allowed() -> bool:
+    return os.environ.get("MV_ALLOW_MOCK_FALLBACK", "").lower() in ("1", "true", "yes")
+
+
 class RFDETRVariant(Enum):
     """RF-DETR model variants."""
     NANO = "nano"       # Smallest, fastest
@@ -276,9 +285,18 @@ class RFDETRDetector:
                 
             except Exception as e:
                 logger.error(f"Failed to load RF-DETR: {e}")
+                if not _mock_fallback_allowed():
+                    raise RFDETRUnavailableError(
+                        f"RF-DETR failed to load ({e}); install rfdetr or set "
+                        "MV_ALLOW_MOCK_FALLBACK=true to permit the mock backend") from e
                 self.model = MockRFDETRModel(self.config.variant, self.config.num_classes)
         else:
-            logger.warning("Using MockRFDETRModel (rfdetr not installed)")
+            if not _mock_fallback_allowed():
+                raise RFDETRUnavailableError(
+                    "rfdetr package is not installed; refusing to silently use "
+                    "MockRFDETRModel. Install rfdetr (requirements-ml.txt) or set "
+                    "MV_ALLOW_MOCK_FALLBACK=true to permit the mock backend")
+            logger.warning("Using MockRFDETRModel (MV_ALLOW_MOCK_FALLBACK=true)")
             self.model = MockRFDETRModel(self.config.variant, self.config.num_classes)
     
     def _load_pretrained(self) -> Any:
@@ -354,6 +372,8 @@ class RFDETRDetector:
             results = self._run_rfdetr_inference(image)
         else:
             results = self.model.predict(image, self.config.confidence_threshold)
+            # Fabricated detections must always be marked as mock.
+            metadata = {**(metadata or {}), "mock": True}
         
         # Convert to RFDETRDetection objects
         detections = self._process_results(results, metadata)
@@ -646,6 +666,115 @@ class RFDETRFineTuner:
             'history': self.training_history
         }
     
+    def _build_model_from_checkpoint(self, checkpoint: Dict[str, Any]) -> Any:
+        """Instantiate an RF-DETR model and load weights from a checkpoint dict."""
+        variant = self.base_variant
+        if isinstance(checkpoint, dict) and 'model_variant' in checkpoint:
+            variant = RFDETRVariant(checkpoint['model_variant'])
+        model = RFDETRLarge() if variant == RFDETRVariant.LARGE else RFDETRBase()
+        state = None
+        if isinstance(checkpoint, dict):
+            state = (checkpoint.get('model_state_dict') or
+                     checkpoint.get('state_dict') or None)
+        if state is None and isinstance(checkpoint, dict):
+            state = checkpoint
+        if state:
+            try:
+                model.model.load_state_dict(state)
+            except Exception as e:
+                logger.warning(f"state_dict load mismatch (continuing with "
+                               f"pretrained head): {e}")
+        return model
+
+    def _load_coco_test_set(self, test_data_dir: str) -> List[Dict[str, Any]]:
+        """Load a COCO-format test split (images + annotations)."""
+        data = Path(test_data_dir)
+        ann_file = None
+        for cand in ("_annotations.coco.json", "annotations.json",
+                     "instances.json"):
+            if (data / cand).exists():
+                ann_file = data / cand
+                break
+        if ann_file is None:
+            raise FileNotFoundError(
+                f"no COCO annotation json found in {test_data_dir}")
+        with open(ann_file) as f:
+            coco = json.load(f)
+        images = {img["id"]: img for img in coco.get("images", [])}
+        anns_by_img: Dict[int, List[Dict[str, Any]]] = {}
+        for ann in coco.get("annotations", []):
+            anns_by_img.setdefault(ann["image_id"], []).append(ann)
+        return [{"image": images[i], "annotations": anns_by_img.get(i, []),
+                 "path": str(data / images[i]["file_name"])}
+                for i in images]
+
+    @staticmethod
+    def _iou_xyxy(a: np.ndarray, b: np.ndarray) -> float:
+        ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+        ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+        iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+        inter = iw * ih
+        area_a = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+        area_b = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+        union = area_a + area_b - inter
+        return inter / union if union > 0 else 0.0
+
+    def _compute_detection_metrics(self, model: Any,
+                                   dataset: List[Dict[str, Any]],
+                                   iou_threshold: float = 0.5) -> Dict[str, float]:
+        """Real mAP@IoU / precision / recall computed by greedy IoU matching."""
+        from PIL import Image
+        tp_scores: List[Tuple[float, int]] = []  # (confidence, is_tp)
+        n_gt = 0
+        for sample in dataset:
+            gts = sample["annotations"]
+            n_gt += len(gts)
+            img = np.array(Image.open(sample["path"]).convert("RGB"))
+            preds = model.predict(img, threshold=0.05)
+            boxes = np.asarray(preds.get("boxes", [])).reshape(-1, 4)
+            scores = np.asarray(preds.get("scores", [])).reshape(-1)
+            labels = np.asarray(preds.get("labels", [])).reshape(-1)
+            matched = set()
+            order = np.argsort(-scores)
+            for pi in order:
+                best_iou, best_gi = 0.0, -1
+                for gi, gt in enumerate(gts):
+                    if gi in matched:
+                        continue
+                    if int(labels[pi]) != int(gt.get("category_id", labels[pi])):
+                        continue
+                    x, y, w, h = gt["bbox"]  # COCO xywh
+                    iou = self._iou_xyxy(boxes[pi],
+                                         np.array([x, y, x + w, y + h]))
+                    if iou > best_iou:
+                        best_iou, best_gi = iou, gi
+                if best_iou >= iou_threshold and best_gi >= 0:
+                    matched.add(best_gi)
+                    tp_scores.append((float(scores[pi]), 1))
+                else:
+                    tp_scores.append((float(scores[pi]), 0))
+        if not tp_scores or n_gt == 0:
+            return {"mAP50": 0.0, "precision": 0.0, "recall": 0.0, "f1": 0.0,
+                    "n_predictions": len(tp_scores), "n_ground_truth": n_gt}
+        tp_scores.sort(key=lambda t: -t[0])
+        tps = np.array([t[1] for t in tp_scores], dtype=float)
+        cum_tp = np.cumsum(tps)
+        ranks = np.arange(1, len(tps) + 1)
+        precision_curve = cum_tp / ranks
+        recall_curve = cum_tp / n_gt
+        # 11-point interpolated AP@0.5
+        ap = 0.0
+        for r in np.linspace(0, 1, 11):
+            mask = recall_curve >= r
+            ap += (precision_curve[mask].max() if mask.any() else 0.0) / 11.0
+        precision = float(cum_tp[-1] / len(tps))
+        recall = float(cum_tp[-1] / n_gt)
+        f1 = (2 * precision * recall / (precision + recall)
+              if precision + recall > 0 else 0.0)
+        return {"mAP50": float(ap), "precision": precision, "recall": recall,
+                "f1": f1, "n_predictions": len(tp_scores),
+                "n_ground_truth": n_gt}
+
     def evaluate(self, checkpoint_path: str, test_data_dir: str) -> Dict[str, float]:
         """
         Evaluate fine-tuned model on test set.
@@ -657,32 +786,25 @@ class RFDETRFineTuner:
         Returns:
             Evaluation metrics
         """
-        if RFDETR_AVAILABLE:
-            try:
-                # Load model and evaluate
-                checkpoint = torch.load(checkpoint_path, map_location=self.device)
-                
-                # Run evaluation
-                # ... actual evaluation code ...
-                
-                return {
-                    'mAP50': 0.75,
-                    'mAP50-95': 0.55,
-                    'precision': 0.80,
-                    'recall': 0.72,
-                    'f1': 0.76
-                }
-            except Exception as e:
-                logger.error(f"Evaluation failed: {e}")
-        
-        # Return simulated metrics
-        return {
-            'mAP50': 0.72 + np.random.uniform(-0.05, 0.05),
-            'mAP50-95': 0.52 + np.random.uniform(-0.05, 0.05),
-            'precision': 0.78 + np.random.uniform(-0.05, 0.05),
-            'recall': 0.70 + np.random.uniform(-0.05, 0.05),
-            'f1': 0.74 + np.random.uniform(-0.05, 0.05)
-        }
+        if not RFDETR_AVAILABLE:
+            raise RFDETRUnavailableError(
+                "cannot evaluate: rfdetr package not installed; no real metrics "
+                "available (install requirements-ml.txt)")
+        try:
+            # Load model and evaluate on the test set
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            model = self._build_model_from_checkpoint(checkpoint)
+            model.model.eval()
+            dataset = self._load_coco_test_set(test_data_dir)
+            return self._compute_detection_metrics(model, dataset)
+        except RFDETRUnavailableError:
+            raise
+        except Exception as e:
+            logger.error(f"Evaluation failed: {e}")
+            raise RFDETRUnavailableError(
+                f"real evaluation failed ({e}); simulated metrics are not "
+                "returned by default. Set MV_ALLOW_MOCK_FALLBACK=true only for "
+                "development scaffolding") from e
 
 
 class RFDETRExporter:
