@@ -80,3 +80,8 @@ duckdb==1.4.4
 #   geoai-py + segment-geospatial + torch (GeoSAM segmentation & deep change detection;
 #     enables GPU backends in /innovations/geoai — CPU fallbacks work without them)
 geoalchemy2==0.18.1
+
+# Hard requirement for AES-256-GCM encryption of culturally sensitive
+# indigenous knowledge (advanced_indigenous). Without it, encryption paths
+# raise RuntimeError instead of silently degrading to XOR.
+cryptography>=42.0.0
