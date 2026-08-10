@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -283,19 +282,19 @@ func setupRouter(
 				return
 			}
 
-			handle := temporalClient.GetWorkflow(context.Background(), workflowID, "")
-			desc, err := handle.Describe(context.Background())
+			desc, err := temporalClient.DescribeWorkflowExecution(context.Background(), workflowID, "")
 			if err != nil {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Workflow not found"})
 				return
 			}
 
+			info := desc.WorkflowExecutionInfo
 			c.JSON(http.StatusOK, gin.H{
 				"workflow_id":  workflowID,
-				"run_id":       desc.WorkflowExecution.RunID,
-				"status":       desc.WorkflowExecutionInfo.Status.String(),
-				"started_at":   desc.WorkflowExecutionInfo.StartTime.Format(time.RFC3339),
-				"completed_at": desc.WorkflowExecutionInfo.CloseTime.Format(time.RFC3339),
+				"run_id":       info.Execution.RunId,
+				"status":       info.Status.String(),
+				"started_at":   info.StartTime.AsTime().Format(time.RFC3339),
+				"completed_at": info.CloseTime.AsTime().Format(time.RFC3339),
 			})
 		})
 
