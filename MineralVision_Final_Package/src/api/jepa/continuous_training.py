@@ -821,35 +821,45 @@ class ContinuousTrainingOrchestrator:
             
             self.model_registry.register_version(model_version)
             
-            # Run training (simulated if no runner provided)
-            if self.pretraining_runner:
-                # Use actual pretraining runner
-                from .pretraining_pipeline import PretrainingJob
-                
-                job = PretrainingJob(
-                    job_name=f"continuous_training_{version_id}",
-                    backbone="vit_large",
-                    pretraining_mode="domain_adaptive",
-                    num_epochs=self.config.continuation_epochs,
-                    batch_size=32,
-                    learning_rate=self.config.continuation_learning_rate,
-                    checkpoint_dir=str(checkpoint_dir),
-                    resume_from=resume_checkpoint,
+            # Run training — always through the real pretraining runner
+            # (which is torch_core-backed and raises JEPAUnavailableError
+            # when the backend is missing). The previous "simulated
+            # training" branch (fabricated losses + dummy checkpoint) has
+            # been removed: retraining must be real or fail LOUDLY.
+            if self.pretraining_runner is None:
+                from .vjepa_integration import JEPAUnavailableError
+
+                model_version.status = ModelStatus.FAILED
+                self.model_registry.register_version(model_version)
+                raise JEPAUnavailableError(
+                    "Continuous training requires a real pretraining runner "
+                    "(PretrainingRunner -> VJEPAPretrainer -> torch_core), "
+                    "but none was provided. Simulated training with "
+                    "fabricated losses has been removed — no fake model "
+                    "versions will be produced."
                 )
-                
-                result = self.pretraining_runner.run_job(job)
-                model_version.training_loss = result.get("final_loss", 0.0)
-                model_version.config["epochs_completed"] = result.get("epochs_completed", 0)
-            else:
-                # Simulated training for testing
-                logger.info("No pretraining runner provided, simulating training...")
-                model_version.training_loss = 0.05 + (0.01 * (1 if current_version else 0))
-                model_version.validation_loss = 0.06 + (0.01 * (1 if current_version else 0))
-                model_version.config["epochs_completed"] = self.config.continuation_epochs
-                
-                # Create dummy checkpoint file
-                with open(model_version.checkpoint_path, "w") as f:
-                    json.dump({"simulated": True, "version": version_id}, f)
+
+            from .pretraining_pipeline import PretrainingJob
+            
+            from .vjepa_integration import VJEPAConfig
+
+            job_config = VJEPAConfig(
+                total_epochs=self.config.continuation_epochs,
+                learning_rate=self.config.continuation_learning_rate,
+                batch_size=32,
+            )
+
+            job = self.pretraining_runner.create_job(
+                job_name=f"continuous_training_{version_id}",
+                config=job_config,
+                data_sources={},
+                checkpoint_dir=str(checkpoint_dir),
+                resume_from=resume_checkpoint,
+            )
+            
+            result = self.pretraining_runner.run_job(job.job_id)
+            model_version.training_loss = result.get("final_loss", 0.0)
+            model_version.config["epochs_completed"] = result.get("epochs_completed", 0)
             
             # Compute checkpoint hash
             if Path(model_version.checkpoint_path).exists():

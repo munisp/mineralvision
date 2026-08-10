@@ -7,6 +7,20 @@ Provides Video Joint-Embedding Predictive Architecture integration for:
 - Anomaly detection and change detection
 - Integration with WALDO detection and SAM3 segmentation
 
+Backend honesty contract (post-decontamination):
+- All model computations (encoding, prediction, pretraining) go through
+  ``api.jepa.torch_core`` — a real PyTorch V-JEPA implementation.
+- When torch_core or PyTorch is unavailable, model-facing entry points
+  raise ``JEPAUnavailableError`` (or ``WaldoIntegrationUnavailable`` for
+  WALDO/SAM3 paths). NO random embeddings, fake losses, fabricated
+  detections, or synthetic masks are ever returned.
+- WALDO detection / SAM3 segmentation additionally support real HTTP
+  backends via the WALDO_SERVICE_URL / SAM3_SERVICE_URL environment
+  variables (docker-compose services).
+- The local lakehouse backend writes real Parquet when pyarrow is
+  installed; otherwise it writes honestly labeled JSON files and reports
+  ``backend == "json"``.
+
 Usage:
     # Create feature extractor
     from api.jepa import create_feature_extractor
@@ -43,6 +57,7 @@ Based on: https://github.com/facebookresearch/jepa
 """
 
 from .vjepa_integration import (
+    JEPAUnavailableError,
     VJEPAConfig,
     ImageryType,
     PretrainingMode,
@@ -85,6 +100,7 @@ from .pretraining_pipeline import (
 )
 
 from .waldo_sam3_integration import (
+    WaldoIntegrationUnavailable,
     IntegrationMode,
     DetectionTarget,
     SegmentationTarget,
@@ -131,6 +147,7 @@ from .lakehouse_integration import (
     TrainingRunRecord,
     LakehouseBackend,
     LocalParquetBackend,
+    LocalJSONBackend,
     DeltaLakeBackend,
     JEPALakehouseStore,
     TrainingDatasetManager,
@@ -159,6 +176,10 @@ from .continuous_training import (
 )
 
 __all__ = [
+    # Errors
+    "JEPAUnavailableError",
+    "WaldoIntegrationUnavailable",
+
     # Core configuration
     "VJEPAConfig",
     "ImageryType",
@@ -256,6 +277,7 @@ __all__ = [
     "TrainingRunRecord",
     "LakehouseBackend",
     "LocalParquetBackend",
+    "LocalJSONBackend",
     "DeltaLakeBackend",
     "JEPALakehouseStore",
     "TrainingDatasetManager",

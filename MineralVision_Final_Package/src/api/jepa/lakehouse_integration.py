@@ -302,36 +302,108 @@ class LakehouseBackend(ABC):
 
 
 class LocalParquetBackend(LakehouseBackend):
-    """Local Parquet-based lakehouse backend for development/testing."""
+    """Local file-based lakehouse backend for development/testing.
+
+    Honesty contract: when ``pyarrow`` is importable, tables are written
+    as real Parquet files (``<table>.parquet``) and ``self.backend ==
+    "parquet"``. When pyarrow is unavailable, tables are written as JSON
+    files with a truthful ``.json`` extension and ``self.backend ==
+    "json"`` — never JSON bytes wearing a ``.parquet`` name.
+    """
     
     def __init__(self, warehouse_path: str):
         self.warehouse_path = Path(warehouse_path)
         self.warehouse_path.mkdir(parents=True, exist_ok=True)
         self._tables: Dict[str, List[Dict[str, Any]]] = {}
+
+        try:
+            import pyarrow  # noqa: F401
+            self._pyarrow_available = True
+            self.backend = "parquet"
+        except ImportError:
+            self._pyarrow_available = False
+            self.backend = "json"
+            logger.warning(
+                "pyarrow not available; LocalParquetBackend will write "
+                "honestly-labeled JSON files (.json extension, backend='json')"
+            )
     
     def _table_path(self, table: str) -> Path:
-        """Get the path for a table."""
-        return self.warehouse_path / f"{table}.json"
+        """Get the path for a table in the currently active format."""
+        return self.warehouse_path / f"{table}.{self.backend}"
+    
+    def _existing_table_path(self, table: str) -> Optional[Path]:
+        """Find an on-disk table file in either supported format."""
+        for ext in ("parquet", "json"):
+            path = self.warehouse_path / f"{table}.{ext}"
+            if path.exists():
+                return path
+        return None
+
+    @staticmethod
+    def _records_to_pylist(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert records so pyarrow can infer a schema.
+
+        Values that pyarrow cannot map to a column type (nested dicts,
+        arbitrary objects) are JSON-encoded strings; the read side leaves
+        them as strings (honest, lossless representation).
+        """
+        clean = []
+        for record in records:
+            row = {}
+            for key, value in record.items():
+                if value is None or isinstance(value, (str, int, float, bool, list)):
+                    row[key] = value
+                else:
+                    row[key] = json.dumps(value, default=str)
+            clean.append(row)
+        return clean
     
     def _load_table(self, table: str) -> List[Dict[str, Any]]:
         """Load a table from disk."""
         if table in self._tables:
             return self._tables[table]
         
-        path = self._table_path(table)
-        if path.exists():
+        path = self._existing_table_path(table)
+        if path is None:
+            self._tables[table] = []
+        elif path.suffix == ".parquet":
+            import pyarrow.parquet as pq
+            self._tables[table] = pq.read_table(path).to_pylist()
+        else:
             with open(path, "r") as f:
                 self._tables[table] = json.load(f)
-        else:
-            self._tables[table] = []
         
         return self._tables[table]
     
     def _save_table(self, table: str) -> None:
-        """Save a table to disk."""
+        """Save a table to disk in the active (honestly labeled) format."""
+        records = self._tables.get(table, [])
         path = self._table_path(table)
-        with open(path, "w") as f:
-            json.dump(self._tables.get(table, []), f, indent=2, default=str)
+
+        if self.backend == "parquet":
+            import pyarrow as pa
+            import pyarrow.parquet as pq
+
+            if records:
+                try:
+                    arrow_table = pa.Table.from_pylist(self._records_to_pylist(records))
+                except (pa.ArrowInvalid, pa.ArrowTypeError):
+                    # Schema inference failed on heterogeneous values; fall
+                    # back to fully JSON-encoded columns rather than failing.
+                    arrow_table = pa.Table.from_pylist([
+                        {k: (v if isinstance(v, (str, type(None))) else json.dumps(v, default=str))
+                         for k, v in row.items()}
+                        for row in records
+                    ])
+                pq.write_table(arrow_table, path)
+            else:
+                # Empty table: write an empty-parquet marker via pyarrow with
+                # a zero-row schema inferred from a single dummy column.
+                pq.write_table(pa.table({"_empty": pa.array([], type=pa.string())}), path)
+        else:
+            with open(path, "w") as f:
+                json.dump(records, f, indent=2, default=str)
     
     def write_records(self, table: str, records: List[Dict[str, Any]]) -> int:
         """Write records to a table."""
@@ -371,13 +443,35 @@ class LocalParquetBackend(LakehouseBackend):
     
     def table_exists(self, table: str) -> bool:
         """Check if a table exists."""
-        return self._table_path(table).exists() or table in self._tables
+        return self._existing_table_path(table) is not None or table in self._tables
     
     def create_table(self, table: str, schema: Dict[str, str]) -> None:
         """Create a table with the given schema."""
         if not self.table_exists(table):
             self._tables[table] = []
             self._save_table(table)
+
+
+# Back-compat alias: the backend is still named LocalParquetBackend and
+# now writes real parquet when pyarrow is available; "LocalJSONBackend"
+# names the honest JSON fallback mode explicitly.
+class LocalJSONBackend(LocalParquetBackend):
+    """Alias for LocalParquetBackend emphasizing the honest JSON fallback.
+
+    Deprecated: use LocalParquetBackend and inspect its ``backend``
+    attribute ("parquet" or "json") to know which on-disk format is in use.
+    """
+
+    def __init__(self, warehouse_path: str):
+        import warnings
+        warnings.warn(
+            "LocalJSONBackend is deprecated; use LocalParquetBackend, which "
+            "writes real parquet when pyarrow is available and honestly "
+            "labeled JSON otherwise (see the 'backend' attribute).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        super().__init__(warehouse_path)
 
 
 class DeltaLakeBackend(LakehouseBackend):
