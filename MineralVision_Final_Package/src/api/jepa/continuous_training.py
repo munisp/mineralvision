@@ -853,9 +853,6 @@ class ContinuousTrainingOrchestrator:
                 job_name=f"continuous_training_{version_id}",
                 config=job_config,
                 data_sources={},
-                num_epochs=self.config.continuation_epochs,
-                batch_size=32,
-                learning_rate=self.config.continuation_learning_rate,
                 checkpoint_dir=str(checkpoint_dir),
                 resume_from=resume_checkpoint,
             )
