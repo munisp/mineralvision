@@ -203,23 +203,57 @@ class AES256EncryptionProvider(EncryptionProvider):
         self.master_key = master_key or os.urandom(32)
         self.keys: Dict[str, bytes] = {}
         self._lock = threading.Lock()
-        
+
+    @staticmethod
+    def _xor_fallback_allowed() -> bool:
+        """XOR fallback is INSECURE and only permitted under explicit opt-in
+        (env MV_INDIGENOUS_ALLOW_XOR_FALLBACK=true) — intended for tests only.
+        Production deployments must have the ``cryptography`` package
+        installed so culturally sensitive data is never XOR-"encrypted".
+        """
+        return os.getenv("MV_INDIGENOUS_ALLOW_XOR_FALLBACK", "").lower() == "true"
+
+    @staticmethod
+    def _require_crypto():
+        """Import AESGCM or raise an honest error with remediation."""
+        try:
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+            return AESGCM
+        except ImportError as exc:
+            raise RuntimeError(
+                "cryptography package is required for encrypting culturally "
+                "sensitive indigenous knowledge (AES-256-GCM) but is not "
+                "installed. Remediation: pip install cryptography. "
+                "The insecure XOR fallback is only available under the "
+                "explicit opt-in MV_INDIGENOUS_ALLOW_XOR_FALLBACK=true "
+                "(tests only)."
+            ) from exc
+
     def encrypt(self, data: bytes, key_id: str = None) -> EncryptedContent:
         """
         Encrypt data using AES-256-GCM.
-        
+
         Args:
             data: Data to encrypt
             key_id: Key identifier (generates new if None)
-            
+
         Returns:
             Encrypted content
+
+        Raises:
+            RuntimeError: when ``cryptography`` is unavailable and the
+                insecure XOR fallback was not explicitly opted into.
         """
         try:
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         except ImportError:
-            # Fallback to simple XOR encryption for environments without cryptography
-            return self._fallback_encrypt(data, key_id)
+            if self._xor_fallback_allowed():
+                logger.warning(
+                    "MV_INDIGENOUS_ALLOW_XOR_FALLBACK=true: using INSECURE XOR "
+                    "fallback encryption (test-only opt-in)"
+                )
+                return self._fallback_encrypt(data, key_id)
+            self._require_crypto()  # always raises
         
         if key_id is None:
             key_id = self.generate_key()
@@ -247,11 +281,30 @@ class AES256EncryptionProvider(EncryptionProvider):
             
         Returns:
             Decrypted data
+
+        Raises:
+            RuntimeError: when ``cryptography`` is unavailable and the
+                insecure XOR fallback was not explicitly opted into.
         """
+        if encrypted.encryption_method == 'XOR-FALLBACK':
+            if self._xor_fallback_allowed():
+                return self._fallback_decrypt(encrypted)
+            raise RuntimeError(
+                "cannot decrypt XOR-FALLBACK content without the explicit "
+                "opt-in MV_INDIGENOUS_ALLOW_XOR_FALLBACK=true; XOR is not "
+                "encryption — re-encrypt with AES-256-GCM (pip install "
+                "cryptography)"
+            )
         try:
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM
         except ImportError:
-            return self._fallback_decrypt(encrypted)
+            if self._xor_fallback_allowed():
+                logger.warning(
+                    "MV_INDIGENOUS_ALLOW_XOR_FALLBACK=true: using INSECURE XOR "
+                    "fallback decryption (test-only opt-in)"
+                )
+                return self._fallback_decrypt(encrypted)
+            self._require_crypto()  # always raises
         
         key = self._get_key(encrypted.key_id)
         aesgcm = AESGCM(key)
