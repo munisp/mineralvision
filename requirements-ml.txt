@@ -8,3 +8,9 @@ torch==2.13.0
 ultralytics==8.4.116
 pytorch-lightning==2.6.5
 transformers==5.14.1
+
+# Optional SAM segmentation backends (api/vision/sam3 — SAM3-ready
+# interface; current loadable backend is ultralytics SAM/SAM2 checkpoint
+# or SAM3_SERVICE_URL; native sam3 package supported when installed)
+# segment-geospatial==1.1.0   # SAM/SAM2 geospatial helpers (optional)
+# sam3                        # native SAM3 backend (optional; install from vendor source)
