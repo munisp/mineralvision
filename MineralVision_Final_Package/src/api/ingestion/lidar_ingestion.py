@@ -164,6 +164,75 @@ class DEMOutput:
     point_density_grid: Optional[np.ndarray] = None
 
 
+class LAZBackendUnavailableError(RuntimeError):
+    """Raised when a .laz file is supplied but no real LAZ backend exists.
+
+    LAZ is LASzip-compressed; it cannot be parsed by the hand-rolled LAS
+    reader and must NEVER be silently treated as gzip or raw LAS.
+    """
+
+    def __init__(self, missing: str = "lazrs"):
+        self.missing = missing
+        super().__init__(
+            f"LAZ decompression backend unavailable: '{missing}' is not "
+            f"installed. Remediation: pip install laspy lazrs (lazrs provides "
+            f"the LASzip decompressor used by laspy for .laz files). Refusing "
+            f"to fabricate point data from a compressed file."
+        )
+
+
+def _read_laz_with_laspy(file_path: str, max_points: Optional[int] = None):
+    """Read a .laz file via laspy + lazrs (the only honest LAZ path).
+
+    Returns (header_dict, points_array[N,6]: x,y,z,intensity,classification,
+    return_number). Raises LAZBackendUnavailableError when laspy or lazrs is
+    missing so callers can surface 503 + remediation instead of fabricating.
+    """
+    try:
+        import laspy  # type: ignore
+    except ImportError:
+        raise LAZBackendUnavailableError("laspy")
+    try:
+        import lazrs  # type: ignore  # noqa: F401
+    except ImportError:
+        raise LAZBackendUnavailableError("lazrs")
+
+    las = laspy.read(file_path)
+    header = las.header
+    n = int(header.point_count)
+    if max_points is not None:
+        n = min(n, max_points)
+
+    points = np.zeros((n, 6), dtype=np.float64)
+    points[:, 0] = np.asarray(las.x[:n], dtype=np.float64)
+    points[:, 1] = np.asarray(las.y[:n], dtype=np.float64)
+    points[:, 2] = np.asarray(las.z[:n], dtype=np.float64)
+    points[:, 3] = np.asarray(las.intensity[:n], dtype=np.float64)
+    points[:, 4] = np.asarray(las.classification[:n], dtype=np.float64)
+    points[:, 5] = np.asarray(las.return_number[:n], dtype=np.float64)
+
+    crs = None
+    try:
+        parsed = header.parse_crs()
+        crs = parsed.to_string() if parsed is not None else None
+    except Exception:
+        crs = None
+
+    header_dict = {
+        "version": f"{header.version.major}.{header.version.minor}",
+        "point_format": int(header.point_format.id),
+        "point_count": int(header.point_count),
+        "scale": [float(s) for s in header.scales],
+        "offset": [float(o) for o in header.offsets],
+        "min_x": float(header.mins[0]), "max_x": float(header.maxs[0]),
+        "min_y": float(header.mins[1]), "max_y": float(header.maxs[1]),
+        "min_z": float(header.mins[2]), "max_z": float(header.maxs[2]),
+        "crs": crs,
+        "backend": "laspy+lazrs",
+    }
+    return header_dict, points
+
+
 class LASReader:
     """Reader for LAS/LAZ format files."""
     
@@ -187,6 +256,39 @@ class LASReader:
     
     def read_header(self) -> LiDARMetadata:
         """Read LAS file header and return metadata."""
+        if self._is_laz:
+            # LAZ is LASzip-compressed: route through laspy+lazrs or fail
+            # honestly. Never gunzip / raw-parse a compressed stream.
+            header, _ = _read_laz_with_laspy(self.file_path, max_points=0)
+            self._header = {
+                'offset_to_points': None,
+                'point_format': header['point_format'],
+                'point_record_length': None,
+                'num_points': header['point_count'],
+                'scale': tuple(header['scale']),
+                'offset': tuple(header['offset']),
+                'backend': header['backend'],
+                'crs': header.get('crs'),
+            }
+            area = (header['max_x'] - header['min_x']) * (header['max_y'] - header['min_y'])
+            fmt_info = self.POINT_FORMATS.get(header['point_format'], self.POINT_FORMATS[0])
+            self.metadata = LiDARMetadata(
+                file_path=self.file_path,
+                format=LiDARFormat.LAZ,
+                version=header['version'],
+                min_x=header['min_x'], max_x=header['max_x'],
+                min_y=header['min_y'], max_y=header['max_y'],
+                min_z=header['min_z'], max_z=header['max_z'],
+                point_count=header['point_count'],
+                point_density=header['point_count'] / area if area > 0 else 0,
+                scale_x=header['scale'][0], scale_y=header['scale'][1], scale_z=header['scale'][2],
+                offset_x=header['offset'][0], offset_y=header['offset'][1], offset_z=header['offset'][2],
+                has_rgb=fmt_info.get('has_rgb', False),
+                has_nir=fmt_info.get('has_nir', False),
+                has_gps_time=fmt_info.get('has_gps', False),
+            )
+            return self.metadata
+
         with open(self.file_path, 'rb') as f:
             # File signature
             signature = f.read(4)
@@ -321,6 +423,21 @@ class LASReader:
         if self.metadata is None:
             self.read_header()
         
+        if self._is_laz:
+            # Real LAZ decode via laspy+lazrs (raises honestly if missing).
+            _, arr = _read_laz_with_laspy(self.file_path, max_points)
+            for row in arr:
+                try:
+                    class_enum = LiDARClassification(int(row[4]))
+                except ValueError:
+                    class_enum = LiDARClassification.UNCLASSIFIED
+                yield LiDARPoint(
+                    x=row[0], y=row[1], z=row[2], intensity=row[3],
+                    return_number=int(row[5]), number_of_returns=0,
+                    classification=class_enum,
+                )
+            return
+        
         with open(self.file_path, 'rb') as f:
             f.seek(self._header['offset_to_points'])
             
@@ -398,6 +515,11 @@ class LASReader:
         """
         if self.metadata is None:
             self.read_header()
+        
+        if self._is_laz:
+            # Real LAZ decode via laspy+lazrs (raises honestly if missing).
+            _, points = _read_laz_with_laspy(self.file_path, max_points)
+            return points
         
         num_points = self._header['num_points']
         if max_points:
