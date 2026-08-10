@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,51 +11,76 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/RootNavigator';
+import { projectsApi, drillholesApi, Project, Drillhole } from '../../services/api';
 
 type RouteProps = RouteProp<RootStackParamList, 'ProjectDetail'>;
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-const mockProject = {
-  id: '1',
-  name: 'Copper Ridge Project',
-  description: 'Porphyry copper-gold exploration in the Western Cordillera. This project targets a large-scale porphyry copper-gold system with potential for significant resource expansion.',
-  location: 'Nevada, USA',
-  commodities: ['Copper', 'Gold'],
-  status: 'active',
-  createdAt: '2023-06-15',
-  updatedAt: '2024-01-15',
-  stats: {
-    drillholes: 156,
-    totalMeters: 45680,
-    samples: 12450,
-    blockModels: 3,
-  },
-};
 
-const mockDrillholes = [
-  { id: '1', holeId: 'DDH-2024-156', depth: 450, status: 'completed', grade: 0.85 },
-  { id: '2', holeId: 'DDH-2024-155', depth: 380, status: 'completed', grade: 1.12 },
-  { id: '3', holeId: 'DDH-2024-154', depth: 520, status: 'completed', grade: 0.72 },
-  { id: '4', holeId: 'DDH-2024-153', depth: 290, status: 'in-progress', grade: null },
-];
 
 export default function ProjectDetailScreen() {
   const route = useRoute<RouteProps>();
   const navigation = useNavigation<NavigationProp>();
   const { projectId } = route.params;
 
+  const [project, setProject] = useState<Project | null>(null);
+  const [holes, setHoles] = useState<Drillhole[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Live data: the project record + its drillholes from the backend.
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const [projectResp, holesResp] = await Promise.all([
+        projectsApi.getById(projectId),
+        drillholesApi.getAll(projectId),
+      ]);
+      setProject(projectResp.data);
+      setHoles(holesResp.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load project');
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom']}>
+        <Text style={styles.description}>Loading project…</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (error || !project) {
+    return (
+      <SafeAreaView style={styles.container} edges={['bottom']}>
+        <Text style={styles.description}>
+          {error ? `Could not load project: ${error}` : 'Project not found'}
+        </Text>
+      </SafeAreaView>
+    );
+  }
+
+  const totalMeters = holes.reduce((sum, h) => sum + (h.totalDepth ?? 0), 0);
+
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         <View style={styles.header}>
-          <Text style={styles.projectName}>{mockProject.name}</Text>
+          <Text style={styles.projectName}>{project.name}</Text>
           <View style={styles.locationRow}>
             <Ionicons name="location-outline" size={16} color="#6b7280" />
-            <Text style={styles.locationText}>{mockProject.location}</Text>
+            <Text style={styles.locationText}>{project.location}</Text>
           </View>
-          <Text style={styles.description}>{mockProject.description}</Text>
+          <Text style={styles.description}>{project.description}</Text>
           <View style={styles.commoditiesRow}>
-            {mockProject.commodities.map((commodity) => (
+            {(project.commodities ?? []).map((commodity) => (
               <View key={commodity} style={styles.commodityBadge}>
                 <Text style={styles.commodityText}>{commodity}</Text>
               </View>
@@ -66,22 +91,22 @@ export default function ProjectDetailScreen() {
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
             <Ionicons name="layers-outline" size={24} color="#3b82f6" />
-            <Text style={styles.statValue}>{mockProject.stats.drillholes}</Text>
+            <Text style={styles.statValue}>{holes.length}</Text>
             <Text style={styles.statLabel}>Drillholes</Text>
           </View>
           <View style={styles.statCard}>
             <Ionicons name="resize-outline" size={24} color="#10b981" />
-            <Text style={styles.statValue}>{(mockProject.stats.totalMeters / 1000).toFixed(1)}K</Text>
+            <Text style={styles.statValue}>{totalMeters >= 1000 ? `${(totalMeters / 1000).toFixed(1)}K` : `${totalMeters}`}</Text>
             <Text style={styles.statLabel}>Meters</Text>
           </View>
           <View style={styles.statCard}>
             <Ionicons name="flask-outline" size={24} color="#f59e0b" />
-            <Text style={styles.statValue}>{(mockProject.stats.samples / 1000).toFixed(1)}K</Text>
+            <Text style={styles.statValue}>{'—'}</Text>
             <Text style={styles.statLabel}>Samples</Text>
           </View>
           <View style={styles.statCard}>
             <Ionicons name="cube-outline" size={24} color="#8b5cf6" />
-            <Text style={styles.statValue}>{mockProject.stats.blockModels}</Text>
+            <Text style={styles.statValue}>{'—'}</Text>
             <Text style={styles.statLabel}>Models</Text>
           </View>
         </View>
@@ -117,7 +142,10 @@ export default function ProjectDetailScreen() {
             </TouchableOpacity>
           </View>
           <View style={styles.drillholesList}>
-            {mockDrillholes.map((hole) => (
+            {holes.length === 0 && (
+              <Text style={styles.description}>No drillholes registered for this project.</Text>
+            )}
+            {holes.slice(0, 10).map((hole) => (
               <TouchableOpacity
                 key={hole.id}
                 style={styles.drillholeCard}
@@ -125,14 +153,10 @@ export default function ProjectDetailScreen() {
               >
                 <View style={styles.drillholeInfo}>
                   <Text style={styles.drillholeId}>{hole.holeId}</Text>
-                  <Text style={styles.drillholeDepth}>{hole.depth}m depth</Text>
+                  <Text style={styles.drillholeDepth}>{hole.totalDepth}m depth</Text>
                 </View>
                 <View style={styles.drillholeRight}>
-                  {hole.grade !== null ? (
-                    <Text style={styles.drillholeGrade}>{hole.grade} g/t</Text>
-                  ) : (
-                    <Text style={styles.drillholeInProgress}>In progress</Text>
-                  )}
+                  <Text style={styles.drillholeGrade}>{hole.status}</Text>
                   <Ionicons name="chevron-forward" size={20} color="#6b7280" />
                 </View>
               </TouchableOpacity>

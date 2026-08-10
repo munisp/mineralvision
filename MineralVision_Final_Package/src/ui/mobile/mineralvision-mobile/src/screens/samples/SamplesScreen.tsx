@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRoute, RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../../navigation/RootNavigator';
+import { samplesApi } from '../../services/api';
 
 type RouteProps = RouteProp<RootStackParamList, 'Samples'>;
 
@@ -28,15 +29,6 @@ interface Sample {
   status: 'assayed' | 'pending' | 'submitted';
 }
 
-const mockSamples: Sample[] = [
-  { id: '1', sampleId: 'DDH-156-001', fromDepth: 0, toDepth: 2, sampleType: 'Core', assays: { Au: 0.12, Cu: 0.05 }, status: 'assayed' },
-  { id: '2', sampleId: 'DDH-156-002', fromDepth: 2, toDepth: 4, sampleType: 'Core', assays: { Au: 0.45, Cu: 0.12 }, status: 'assayed' },
-  { id: '3', sampleId: 'DDH-156-003', fromDepth: 4, toDepth: 6, sampleType: 'Core', assays: { Au: 1.25, Cu: 0.35 }, status: 'assayed' },
-  { id: '4', sampleId: 'DDH-156-004', fromDepth: 6, toDepth: 8, sampleType: 'Core', assays: { Au: 2.85, Cu: 0.82 }, status: 'assayed' },
-  { id: '5', sampleId: 'DDH-156-005', fromDepth: 8, toDepth: 10, sampleType: 'Core', assays: { Au: 1.92, Cu: 0.65 }, status: 'assayed' },
-  { id: '6', sampleId: 'DDH-156-006', fromDepth: 10, toDepth: 12, sampleType: 'Core', assays: {}, status: 'submitted' },
-  { id: '7', sampleId: 'DDH-156-007', fromDepth: 12, toDepth: 14, sampleType: 'Core', assays: {}, status: 'pending' },
-];
 
 const statusColors = {
   assayed: '#10b981',
@@ -104,20 +96,51 @@ export default function SamplesScreen() {
   const route = useRoute<RouteProps>();
   const { drillholeId } = route.params;
   const [refreshing, setRefreshing] = useState(false);
+  const [samples, setSamples] = useState<Sample[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Live data: samples for this drillhole from the backend register.
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const resp = await samplesApi.getAll(drillholeId);
+      setSamples(
+        resp.data.map((sm) => ({
+          id: sm.id,
+          sampleId: sm.sampleId,
+          fromDepth: sm.fromDepth,
+          toDepth: sm.toDepth,
+          sampleType: sm.sampleType,
+          assays: sm.assays ?? {},
+          // The API has no per-sample lab status; presence of assays implies assayed.
+          status: sm.assays && Object.keys(sm.assays).length > 0 ? 'assayed' : 'pending',
+        })),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load samples');
+    } finally {
+      setLoading(false);
+    }
+  }, [drillholeId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
+    load().finally(() => setRefreshing(false));
+  }, [load]);
 
-  const assayedCount = mockSamples.filter((s) => s.status === 'assayed').length;
-  const pendingCount = mockSamples.filter((s) => s.status !== 'assayed').length;
+  const assayedCount = samples.filter((s) => s.status === 'assayed').length;
+  const pendingCount = samples.filter((s) => s.status !== 'assayed').length;
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       <View style={styles.summaryRow}>
         <View style={styles.summaryCard}>
-          <Text style={styles.summaryValue}>{mockSamples.length}</Text>
+          <Text style={styles.summaryValue}>{samples.length}</Text>
           <Text style={styles.summaryLabel}>Total Samples</Text>
         </View>
         <View style={styles.summaryCard}>
@@ -131,7 +154,7 @@ export default function SamplesScreen() {
       </View>
 
       <FlatList
-        data={mockSamples}
+        data={samples}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <SampleCard sample={item} />}
         contentContainerStyle={styles.listContent}
@@ -141,7 +164,13 @@ export default function SamplesScreen() {
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Ionicons name="flask-outline" size={48} color="#6b7280" />
-            <Text style={styles.emptyText}>No samples found</Text>
+            <Text style={styles.emptyText}>
+              {loading
+                ? 'Loading samples…'
+                : error
+                  ? `Could not load samples: ${error}`
+                  : 'No samples for this drillhole'}
+            </Text>
           </View>
         }
       />

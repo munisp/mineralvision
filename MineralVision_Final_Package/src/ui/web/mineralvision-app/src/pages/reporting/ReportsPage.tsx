@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { reportsApi, projectsApi } from '../../services/api';
 import {
   Plus,
   FileText,
@@ -19,12 +20,6 @@ interface Report {
   author: string;
 }
 
-const mockReports: Report[] = [
-  { id: '1', name: 'Copper Ridge Technical Report', type: 'ni43-101', project: 'Copper Ridge', status: 'review', createdAt: '2024-01-10', updatedAt: '2024-01-15', author: 'John Smith' },
-  { id: '2', name: 'Golden Valley Resource Estimate', type: 'jorc', project: 'Golden Valley', status: 'approved', createdAt: '2024-01-05', updatedAt: '2024-01-12', author: 'Jane Doe' },
-  { id: '3', name: 'Q4 2023 Exploration Summary', type: 'custom', project: 'All Projects', status: 'published', createdAt: '2023-12-20', updatedAt: '2024-01-02', author: 'Mike Johnson' },
-  { id: '4', name: 'Lithium Flats Preliminary Assessment', type: 'ni43-101', project: 'Lithium Flats', status: 'draft', createdAt: '2024-01-14', updatedAt: '2024-01-14', author: 'Sarah Wilson' },
-];
 
 const statusColors = {
   draft: 'bg-gray-500/10 text-gray-500',
@@ -39,11 +34,79 @@ const typeLabels = {
   'custom': 'Custom',
 };
 
+interface ApiReport {
+  id: string;
+  name?: string;
+  title?: string;
+  type?: string;
+  standard?: string;
+  projectId?: string;
+  status?: string;
+  created_at?: string;
+  updated_at?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  author?: string;
+  [key: string]: unknown;
+}
+
+/** Map the backend report record onto the card model, tolerantly. */
+function toReport(r: ApiReport, projectNames: Map<string, string>): Report {
+  const rawType = (r.type ?? r.standard ?? 'custom').toLowerCase();
+  const type: Report['type'] = rawType.includes('43') ? 'ni43-101' : rawType.includes('jorc') ? 'jorc' : 'custom';
+  const rawStatus = (r.status ?? 'draft').toLowerCase();
+  const status: Report['status'] =
+    rawStatus === 'review' || rawStatus === 'approved' || rawStatus === 'published'
+      ? rawStatus
+      : 'draft';
+  const created = r.created_at ?? r.createdAt ?? '';
+  const updated = r.updated_at ?? r.updatedAt ?? created;
+  return {
+    id: r.id,
+    name: r.name ?? r.title ?? 'Untitled report',
+    type,
+    project: r.projectId ? projectNames.get(r.projectId) ?? r.projectId : 'All Projects',
+    status,
+    createdAt: created,
+    updatedAt: updated,
+    author: r.author ?? '—',
+  };
+}
+
 export default function ReportsPage() {
   const [selectedType, setSelectedType] = useState('all');
   const [showNewReportModal, setShowNewReportModal] = useState(false);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const filteredReports = mockReports.filter(
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadState('loading');
+      try {
+        const [reportsResp, projectsResp] = await Promise.all([
+          reportsApi.list(),
+          projectsApi.list(),
+        ]);
+        if (cancelled) return;
+        const names = new Map(projectsResp.data.map((p) => [p.id, p.name]));
+        const raw = Array.isArray(reportsResp.data) ? (reportsResp.data as ApiReport[]) : [];
+        setReports(raw.map((r) => toReport(r, names)));
+        setLoadState('ready');
+      } catch (err) {
+        if (!cancelled) {
+          setLoadState('error');
+          setErrorMessage(err instanceof Error ? err.message : 'Failed to load reports');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filteredReports = reports.filter(
     (report) => selectedType === 'all' || report.type === selectedType
   );
 
@@ -79,6 +142,24 @@ export default function ReportsPage() {
         ))}
       </div>
 
+      {loadState === 'loading' && (
+        <div className="bg-card border border-border rounded-xl p-10 text-center text-sm text-muted-foreground">
+          Loading reports…
+        </div>
+      )}
+      {loadState === 'error' && (
+        <div className="bg-destructive/10 border border-destructive/40 text-destructive rounded-xl p-4 text-sm">
+          Failed to load reports: {errorMessage}
+        </div>
+      )}
+      {loadState === 'ready' && filteredReports.length === 0 && (
+        <div className="bg-card border border-border rounded-xl p-10 text-center text-sm text-muted-foreground">
+          {reports.length === 0
+            ? 'No reports yet. Generate one with the New Report button or the reports API.'
+            : 'No reports match this filter.'}
+        </div>
+      )}
+      {loadState === 'ready' && filteredReports.length > 0 && (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredReports.map((report) => (
           <div
@@ -124,6 +205,7 @@ export default function ReportsPage() {
           </div>
         ))}
       </div>
+      )}
 
       <div className="bg-card border border-border rounded-xl p-5">
         <h2 className="text-lg font-semibold text-foreground mb-4">Report Templates</h2>

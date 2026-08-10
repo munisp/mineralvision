@@ -1,16 +1,43 @@
-import { useState } from 'react';
-import { Plus, Download, Eye, Settings } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Plus, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
+import api, { BlockModel, projectsApi, Project } from '../../services/api';
 
-const mockBlockModels = [
-  { id: '1', name: 'Copper Ridge - Zone A', cells: 125000, tonnage: 45.2, grade: 1.45, status: 'estimated' },
-  { id: '2', name: 'Copper Ridge - Zone B', cells: 89000, tonnage: 32.1, grade: 1.12, status: 'estimated' },
-  { id: '3', name: 'Golden Valley - Main', cells: 156000, tonnage: 28.5, grade: 2.85, status: 'classified' },
-  { id: '4', name: 'Lithium Flats - Brine', cells: 45000, tonnage: 12.8, grade: 850, status: 'draft' },
-];
+type LoadState = 'loading' | 'ready' | 'error';
 
+/**
+ * Block Models — wired to the real geostatistics API:
+ *   GET  /api/geostatistics/block-model   (list)
+ *   POST /api/geostatistics/block-model   (create)
+ * Replaces a fully hardcoded model list and detail panels.
+ */
 export default function BlockModelPage() {
-  const [selectedModel, setSelectedModel] = useState<string | null>('1');
+  const [models, setModels] = useState<BlockModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [showNewModelModal, setShowNewModelModal] = useState(false);
+  const [loadState, setLoadState] = useState<LoadState>('loading');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoadState('loading');
+    setErrorMessage(null);
+    try {
+      const resp = await api.get<BlockModel[]>('/api/geostatistics/block-model');
+      const list = Array.isArray(resp.data) ? resp.data : [];
+      setModels(list);
+      setSelectedModel((prev) => prev ?? list[0]?.id ?? null);
+      setLoadState('ready');
+    } catch (err) {
+      setLoadState('error');
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to load block models');
+    }
+  };
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const selected = models.find((m) => m.id === selectedModel) ?? null;
 
   return (
     <div className="space-y-6">
@@ -19,248 +46,214 @@ export default function BlockModelPage() {
           <h1 className="text-2xl font-bold text-foreground">Block Models</h1>
           <p className="text-muted-foreground">Create and manage resource block models</p>
         </div>
-        <button
-          onClick={() => setShowNewModelModal(true)}
-          className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 flex items-center gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          New Block Model
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => void load()}
+            className="p-2 border border-input rounded-lg text-foreground hover:bg-secondary"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setShowNewModelModal(true)}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 flex items-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            New Block Model
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-1">
-          <div className="bg-card border border-border rounded-xl p-4">
-            <h2 className="text-sm font-semibold text-foreground mb-3">Block Models</h2>
-            <div className="space-y-2">
-              {mockBlockModels.map((model) => (
-                <button
-                  key={model.id}
-                  onClick={() => setSelectedModel(model.id)}
-                  className={`w-full text-left p-3 rounded-lg transition-colors ${
-                    selectedModel === model.id
-                      ? 'bg-primary/10 border border-primary/50'
-                      : 'bg-background hover:bg-secondary border border-transparent'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="font-medium text-foreground">{model.name}</p>
-                    <span className={`px-2 py-0.5 text-xs rounded-full ${
-                      model.status === 'classified' ? 'bg-green-500/10 text-green-500' :
-                      model.status === 'estimated' ? 'bg-blue-500/10 text-blue-500' :
-                      'bg-yellow-500/10 text-yellow-500'
-                    }`}>
-                      {model.status}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {model.cells.toLocaleString()} cells | {model.tonnage} Mt
-                  </p>
-                </button>
-              ))}
-            </div>
+      {loadState === 'loading' && (
+        <div className="bg-card border border-border rounded-xl p-10 flex items-center justify-center gap-2">
+          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+          <span className="text-sm text-foreground">Loading block models…</span>
+        </div>
+      )}
+
+      {loadState === 'error' && (
+        <div className="bg-destructive/10 border border-destructive/40 text-destructive rounded-xl p-4 text-sm flex items-start gap-2">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold">Failed to load block models</p>
+            <p>{errorMessage}</p>
           </div>
         </div>
+      )}
 
-        <div className="lg:col-span-2 space-y-6">
-          {selectedModel && (() => {
-            const model = mockBlockModels.find((m) => m.id === selectedModel);
-            if (!model) return null;
-            return (
-              <>
-                <div className="bg-card border border-border rounded-xl p-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-lg font-semibold text-foreground">{model.name}</h2>
-                    <div className="flex items-center gap-2">
-                      <button className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded">
-                        <Eye className="h-4 w-4" />
-                      </button>
-                      <button className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded">
-                        <Download className="h-4 w-4" />
-                      </button>
-                      <button className="p-2 text-muted-foreground hover:text-foreground hover:bg-secondary rounded">
-                        <Settings className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="p-3 bg-background rounded-lg">
-                      <p className="text-xs text-muted-foreground">Total Cells</p>
-                      <p className="text-xl font-bold text-foreground">{model.cells.toLocaleString()}</p>
-                    </div>
-                    <div className="p-3 bg-background rounded-lg">
-                      <p className="text-xs text-muted-foreground">Tonnage</p>
-                      <p className="text-xl font-bold text-foreground">{model.tonnage} Mt</p>
-                    </div>
-                    <div className="p-3 bg-background rounded-lg">
-                      <p className="text-xs text-muted-foreground">Avg Grade</p>
-                      <p className="text-xl font-bold text-foreground">{model.grade} {model.id === '4' ? 'ppm' : 'g/t'}</p>
-                    </div>
-                    <div className="p-3 bg-background rounded-lg">
-                      <p className="text-xs text-muted-foreground">Status</p>
-                      <p className="text-xl font-bold text-foreground capitalize">{model.status}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-card border border-border rounded-xl p-5">
-                  <h2 className="text-lg font-semibold text-foreground mb-4">Model Definition</h2>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                      <h3 className="text-sm font-medium text-muted-foreground mb-2">Origin</h3>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between p-2 bg-background rounded">
-                          <span className="text-muted-foreground">X</span>
-                          <span className="text-foreground font-mono">456,000</span>
-                        </div>
-                        <div className="flex justify-between p-2 bg-background rounded">
-                          <span className="text-muted-foreground">Y</span>
-                          <span className="text-foreground font-mono">7,654,000</span>
-                        </div>
-                        <div className="flex justify-between p-2 bg-background rounded">
-                          <span className="text-muted-foreground">Z</span>
-                          <span className="text-foreground font-mono">800</span>
-                        </div>
+      {loadState === 'ready' && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1">
+            <div className="bg-card border border-border rounded-xl p-4">
+              <h2 className="text-sm font-semibold text-foreground mb-3">
+                Block Models ({models.length})
+              </h2>
+              {models.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No block models yet. Create one with the button above.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {models.map((model) => (
+                    <button
+                      key={model.id}
+                      onClick={() => setSelectedModel(model.id)}
+                      className={`w-full text-left p-3 rounded-lg transition-colors ${
+                        selectedModel === model.id
+                          ? 'bg-primary/10 border border-primary/50'
+                          : 'bg-background hover:bg-secondary border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="font-medium text-foreground">{model.name}</p>
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-blue-500/10 text-blue-500">
+                          {model.classification || 'unclassified'}
+                        </span>
                       </div>
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-medium text-muted-foreground mb-2">Cell Size</h3>
-                      <div className="space-y-2 text-sm">
-                        <div className="flex justify-between p-2 bg-background rounded">
-                          <span className="text-muted-foreground">X</span>
-                          <span className="text-foreground font-mono">10m</span>
-                        </div>
-                        <div className="flex justify-between p-2 bg-background rounded">
-                          <span className="text-muted-foreground">Y</span>
-                          <span className="text-foreground font-mono">10m</span>
-                        </div>
-                        <div className="flex justify-between p-2 bg-background rounded">
-                          <span className="text-muted-foreground">Z</span>
-                          <span className="text-foreground font-mono">5m</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {model.cellCount.toLocaleString()} cells · {model.tonnage} Mt
+                      </p>
+                    </button>
+                  ))}
                 </div>
+              )}
+            </div>
+          </div>
 
-                <div className="bg-card border border-border rounded-xl p-5">
-                  <h2 className="text-lg font-semibold text-foreground mb-4">Resource Classification</h2>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b border-border">
-                          <th className="text-left py-2 px-3 text-muted-foreground">Category</th>
-                          <th className="text-right py-2 px-3 text-muted-foreground">Tonnage (Mt)</th>
-                          <th className="text-right py-2 px-3 text-muted-foreground">Grade (g/t)</th>
-                          <th className="text-right py-2 px-3 text-muted-foreground">Metal (koz)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr className="border-b border-border/50">
-                          <td className="py-2 px-3 text-foreground">Measured</td>
-                          <td className="py-2 px-3 text-right text-foreground">12.5</td>
-                          <td className="py-2 px-3 text-right text-foreground">1.82</td>
-                          <td className="py-2 px-3 text-right text-foreground">732</td>
-                        </tr>
-                        <tr className="border-b border-border/50">
-                          <td className="py-2 px-3 text-foreground">Indicated</td>
-                          <td className="py-2 px-3 text-right text-foreground">22.8</td>
-                          <td className="py-2 px-3 text-right text-foreground">1.45</td>
-                          <td className="py-2 px-3 text-right text-foreground">1,063</td>
-                        </tr>
-                        <tr className="border-b border-border/50">
-                          <td className="py-2 px-3 text-foreground">Inferred</td>
-                          <td className="py-2 px-3 text-right text-foreground">9.9</td>
-                          <td className="py-2 px-3 text-right text-foreground">1.12</td>
-                          <td className="py-2 px-3 text-right text-foreground">357</td>
-                        </tr>
-                        <tr className="bg-primary/5">
-                          <td className="py-2 px-3 font-bold text-foreground">Total</td>
-                          <td className="py-2 px-3 text-right font-bold text-foreground">45.2</td>
-                          <td className="py-2 px-3 text-right font-bold text-foreground">1.48</td>
-                          <td className="py-2 px-3 text-right font-bold text-foreground">2,152</td>
-                        </tr>
-                      </tbody>
-                    </table>
+          <div className="lg:col-span-2">
+            {selected ? (
+              <div className="bg-card border border-border rounded-xl p-5">
+                <h2 className="text-lg font-semibold text-foreground mb-4">{selected.name}</h2>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Cells</p>
+                    <p className="text-lg font-semibold text-foreground">
+                      {selected.cellCount.toLocaleString()}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Tonnage (Mt)</p>
+                    <p className="text-lg font-semibold text-foreground">{selected.tonnage}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Grade</p>
+                    <p className="text-lg font-semibold text-foreground">{selected.grade}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Classification</p>
+                    <p className="text-lg font-semibold text-foreground">
+                      {selected.classification || '—'}
+                    </p>
                   </div>
                 </div>
-              </>
-            );
-          })()}
+                <p className="text-xs text-muted-foreground mt-4">
+                  Project: {selected.projectId}
+                </p>
+              </div>
+            ) : (
+              <div className="bg-card border border-border rounded-xl p-10 text-center text-sm text-muted-foreground">
+                Select a block model to view its details.
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {showNewModelModal && (
-        <NewBlockModelModal onClose={() => setShowNewModelModal(false)} />
+        <NewBlockModelModal
+          onClose={() => setShowNewModelModal(false)}
+          onCreated={() => {
+            setShowNewModelModal(false);
+            void load();
+          }}
+        />
       )}
     </div>
   );
 }
 
-function NewBlockModelModal({ onClose }: { onClose: () => void }) {
+function NewBlockModelModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    projectsApi
+      .list()
+      .then((r) => {
+        setProjects(r.data);
+        setProjectId(r.data[0]?.id ?? '');
+      })
+      .catch(() => setError('Could not load projects'));
+  }, []);
+
+  const submit = async () => {
+    if (!projectId) {
+      setError('Select a project first.');
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.post('/api/geostatistics/block-model', {
+        projectId,
+        origin: { x: 0, y: 0, z: 0 },
+        cellSize: { x: 25, y: 25, z: 10 },
+        dimensions: { nx: 20, ny: 20, nz: 10 },
+      });
+      onCreated();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create block model');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-card border border-border rounded-xl w-full max-w-lg">
-        <div className="p-6 border-b border-border">
-          <h2 className="text-xl font-semibold text-foreground">Create Block Model</h2>
+      <div className="bg-card border border-border rounded-xl w-full max-w-md p-6 space-y-4">
+        <h2 className="text-xl font-semibold text-foreground">New Block Model</h2>
+        <div>
+          <label className="block text-xs text-muted-foreground mb-1">Project</label>
+          <select
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground text-sm"
+          >
+            {projects.length === 0 && <option value="">No projects available</option>}
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
         </div>
-        <form className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">Model Name</label>
-            <input type="text" className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">Origin X</label>
-              <input type="number" className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">Origin Y</label>
-              <input type="number" className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">Origin Z</label>
-              <input type="number" className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">Cell X (m)</label>
-              <input type="number" defaultValue={10} className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">Cell Y (m)</label>
-              <input type="number" defaultValue={10} className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">Cell Z (m)</label>
-              <input type="number" defaultValue={5} className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">Blocks X</label>
-              <input type="number" defaultValue={50} className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">Blocks Y</label>
-              <input type="number" defaultValue={50} className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">Blocks Z</label>
-              <input type="number" defaultValue={50} className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-          </div>
-          <div className="flex gap-3 pt-4">
-            <button type="button" onClick={onClose} className="flex-1 px-4 py-2 border border-input rounded-lg text-foreground hover:bg-secondary">
-              Cancel
-            </button>
-            <button type="submit" className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90">
-              Create Model
-            </button>
-          </div>
-        </form>
+        <p className="text-xs text-muted-foreground">
+          Creates an empty 20×20×10 model (25×25×10 m cells) via the geostatistics API. Estimation
+          runs separately (Kriging page).
+        </p>
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-input rounded-lg text-foreground hover:bg-secondary text-sm"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => void submit()}
+            disabled={submitting || !projectId}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 text-sm disabled:opacity-50"
+          >
+            {submitting ? 'Creating…' : 'Create'}
+          </button>
+        </div>
       </div>
     </div>
   );

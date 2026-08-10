@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/RootNavigator';
+import { projectsApi, drillholesApi, Project as ApiProject } from '../../services/api';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -27,48 +28,6 @@ interface Project {
   lastUpdated: string;
 }
 
-const mockProjects: Project[] = [
-  {
-    id: '1',
-    name: 'Copper Ridge Project',
-    description: 'Porphyry copper-gold exploration',
-    location: 'Nevada, USA',
-    commodities: ['Copper', 'Gold'],
-    status: 'active',
-    drillholes: 156,
-    lastUpdated: '2024-01-15',
-  },
-  {
-    id: '2',
-    name: 'Golden Valley',
-    description: 'Orogenic gold deposit',
-    location: 'Western Australia',
-    commodities: ['Gold'],
-    status: 'active',
-    drillholes: 312,
-    lastUpdated: '2024-01-12',
-  },
-  {
-    id: '3',
-    name: 'Lithium Flats',
-    description: 'Lithium brine exploration',
-    location: 'Atacama, Chile',
-    commodities: ['Lithium'],
-    status: 'active',
-    drillholes: 48,
-    lastUpdated: '2024-01-10',
-  },
-  {
-    id: '4',
-    name: 'Iron Mountain',
-    description: 'BIF-hosted iron ore deposit',
-    location: 'Pilbara, Australia',
-    commodities: ['Iron'],
-    status: 'completed',
-    drillholes: 89,
-    lastUpdated: '2023-12-20',
-  },
-];
 
 const statusColors = {
   active: '#10b981',
@@ -129,16 +88,54 @@ export default function ProjectsScreen() {
   const navigation = useNavigation<NavigationProp>();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredProjects = mockProjects.filter((project) =>
+  // Live data: projects + per-project drillhole counts from the register.
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const [projectsResp, holesResp] = await Promise.all([
+        projectsApi.getAll(),
+        drillholesApi.getAll(),
+      ]);
+      const counts = new Map<string, number>();
+      for (const h of holesResp.data) {
+        counts.set(h.projectId, (counts.get(h.projectId) ?? 0) + 1);
+      }
+      setProjects(
+        projectsResp.data.map((p: ApiProject) => ({
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          location: p.location,
+          commodities: p.commodities ?? [],
+          status: p.status,
+          drillholes: counts.get(p.id) ?? 0,
+          lastUpdated: p.updatedAt,
+        })),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load projects');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const filteredProjects = projects.filter((project) =>
     project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     project.location.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
+    load().finally(() => setRefreshing(false));
+  }, [load]);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -179,7 +176,13 @@ export default function ProjectsScreen() {
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Ionicons name="folder-open-outline" size={48} color="#6b7280" />
-            <Text style={styles.emptyText}>No projects found</Text>
+            <Text style={styles.emptyText}>
+              {loading
+                ? 'Loading projects…'
+                : error
+                  ? `Could not load projects: ${error}`
+                  : 'No projects registered'}
+            </Text>
           </View>
         }
       />

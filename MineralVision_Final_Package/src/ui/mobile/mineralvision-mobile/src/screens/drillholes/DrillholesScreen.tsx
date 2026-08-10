@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/RootNavigator';
+import { drillholesApi, projectsApi, Drillhole as ApiDrillhole } from '../../services/api';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -28,15 +29,6 @@ interface Drillhole {
   avgGrade: number | null;
 }
 
-const mockDrillholes: Drillhole[] = [
-  { id: '1', holeId: 'DDH-2024-156', project: 'Copper Ridge', depth: 450, azimuth: 45, dip: -60, status: 'completed', assayCount: 45, avgGrade: 0.85 },
-  { id: '2', holeId: 'DDH-2024-155', project: 'Copper Ridge', depth: 380, azimuth: 45, dip: -60, status: 'completed', assayCount: 38, avgGrade: 1.12 },
-  { id: '3', holeId: 'DDH-2024-154', project: 'Copper Ridge', depth: 520, azimuth: 90, dip: -55, status: 'completed', assayCount: 52, avgGrade: 0.72 },
-  { id: '4', holeId: 'DDH-2024-153', project: 'Copper Ridge', depth: 290, azimuth: 45, dip: -60, status: 'in-progress', assayCount: 15, avgGrade: null },
-  { id: '5', holeId: 'GV-2024-089', project: 'Golden Valley', depth: 320, azimuth: 0, dip: -90, status: 'completed', assayCount: 64, avgGrade: 2.45 },
-  { id: '6', holeId: 'GV-2024-088', project: 'Golden Valley', depth: 280, azimuth: 0, dip: -90, status: 'completed', assayCount: 56, avgGrade: 3.12 },
-  { id: '7', holeId: 'LF-2024-012', project: 'Lithium Flats', depth: 150, azimuth: 0, dip: -90, status: 'completed', assayCount: 30, avgGrade: 850 },
-];
 
 const statusColors = {
   completed: '#10b981',
@@ -92,16 +84,52 @@ export default function DrillholesScreen() {
   const navigation = useNavigation<NavigationProp>();
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [drillholes, setDrillholes] = useState<Drillhole[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredDrillholes = mockDrillholes.filter((hole) =>
+  // Live data: drillhole register + project names from the backend.
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const [holesResp, projectsResp] = await Promise.all([
+        drillholesApi.getAll(),
+        projectsApi.getAll(),
+      ]);
+      const names = new Map(projectsResp.data.map((p) => [p.id, p.name]));
+      setDrillholes(
+        holesResp.data.map((h: ApiDrillhole) => ({
+          id: h.id,
+          holeId: h.holeId,
+          project: names.get(h.projectId) ?? h.projectId,
+          depth: h.totalDepth,
+          azimuth: h.azimuth ?? 0,
+          dip: h.dip ?? -90,
+          status: h.status ?? 'planned',
+          assayCount: (h as ApiDrillhole & { assayCount?: number }).assayCount ?? 0,
+          avgGrade: null, // not provided by the list endpoint
+        })),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load drillholes');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const filteredDrillholes = drillholes.filter((hole) =>
     hole.holeId.toLowerCase().includes(searchQuery.toLowerCase()) ||
     hole.project.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
-  }, []);
+    load().finally(() => setRefreshing(false));
+  }, [load]);
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -128,18 +156,18 @@ export default function DrillholesScreen() {
 
       <View style={styles.summaryRow}>
         <View style={styles.summaryItem}>
-          <Text style={styles.summaryValue}>{mockDrillholes.length}</Text>
+          <Text style={styles.summaryValue}>{drillholes.length}</Text>
           <Text style={styles.summaryLabel}>Total</Text>
         </View>
         <View style={styles.summaryItem}>
           <Text style={[styles.summaryValue, { color: '#10b981' }]}>
-            {mockDrillholes.filter((h) => h.status === 'completed').length}
+            {drillholes.filter((h) => h.status === 'completed').length}
           </Text>
           <Text style={styles.summaryLabel}>Completed</Text>
         </View>
         <View style={styles.summaryItem}>
           <Text style={[styles.summaryValue, { color: '#f59e0b' }]}>
-            {mockDrillholes.filter((h) => h.status === 'in-progress').length}
+            {drillholes.filter((h) => h.status === 'in-progress').length}
           </Text>
           <Text style={styles.summaryLabel}>In Progress</Text>
         </View>
@@ -161,7 +189,13 @@ export default function DrillholesScreen() {
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <Ionicons name="layers-outline" size={48} color="#6b7280" />
-            <Text style={styles.emptyText}>No drillholes found</Text>
+            <Text style={styles.emptyText}>
+              {loading
+                ? 'Loading drillholes…'
+                : error
+                  ? `Could not load drillholes: ${error}`
+                  : 'No drillholes in the register'}
+            </Text>
           </View>
         }
       />
