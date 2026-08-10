@@ -344,21 +344,42 @@ class RFDETRDetector(BaseDetector):
     def _load_model(self) -> None:
         """Load RF-DETR model."""
         try:
-            # RF-DETR loading (placeholder - actual implementation depends on library)
+            from rfdetr import RFDETRBase  # lazy: heavy optional dep
+        except ImportError as e:
+            raise BackendUnavailableError(
+                "RF-DETR backend unavailable: the 'rfdetr' package is not "
+                "installed. Remediation: pip install rfdetr, or choose a "
+                "different detector backend. No detections were fabricated."
+            ) from e
+        try:
             logger.info(f"Loading RF-DETR model: {self.model_path}")
-            self._model = {"loaded": True}  # Placeholder
+            self._model = RFDETRBase(pretrain_weights=self.model_path)
         except Exception as e:
-            logger.error(f"Failed to load RF-DETR: {e}")
-            raise
+            raise BackendUnavailableError(
+                f"RF-DETR backend unavailable: failed to load weights "
+                f"'{self.model_path}': {e}"
+            ) from e
     
     def detect(self, image: Any) -> List[Detection]:
         """Run detection on image."""
         if self._model is None:
             self._load_model()
         
-        # Placeholder - actual RF-DETR inference
+        # Real RF-DETR inference; empty list ONLY when the model found nothing
+        raw = self._model.predict(image, threshold=self.confidence_threshold)
         detections = []
-        logger.debug("RF-DETR detection (placeholder)")
+        for box, score, cls in zip(
+            getattr(raw, "xyxy", []),
+            getattr(raw, "confidence", []),
+            getattr(raw, "class_id", []),
+        ):
+            detections.append(Detection(
+                bbox=BoundingBox(x1=float(box[0]), y1=float(box[1]),
+                                 x2=float(box[2]), y2=float(box[3])),
+                confidence=float(score),
+                class_name=str(cls),
+                source="rf_detr",
+            ))
         return detections
     
     def detect_batch(self, images: List[Any]) -> List[List[Detection]]:
@@ -508,11 +529,39 @@ class SAM3Segmenter:
         self.points_per_side = points_per_side
         self.device = device
         self._model = None
+        self._backend = None
     
     def _load_model(self) -> None:
-        """Load SAM3 model."""
-        logger.info(f"Loading SAM3 model: {self.model_type}")
-        self._model = {"loaded": True}  # Placeholder
+        """Load SAM3 model (real backend only — never a placeholder)."""
+        backend_errors = []
+        # Preferred: the official sam3 package
+        try:
+            from sam3 import Sam3Predictor  # type: ignore  # lazy optional dep
+            logger.info(f"Loading SAM3 model: {self.model_type}")
+            self._model = Sam3Predictor(self.model_type)
+            self._backend = "sam3"
+            return
+        except ImportError as e:
+            backend_errors.append(f"sam3 package not installed ({e})")
+        except Exception as e:
+            backend_errors.append(f"sam3 load failed ({e})")
+        # Fallback: ultralytics SAM predictor
+        try:
+            from ultralytics import SAM  # lazy optional dep
+            logger.info(f"Loading SAM via ultralytics: {self.model_type}")
+            self._model = SAM(self.model_type)
+            self._backend = "ultralytics"
+            return
+        except ImportError as e:
+            backend_errors.append(f"ultralytics not installed ({e})")
+        except Exception as e:
+            backend_errors.append(f"ultralytics SAM load failed ({e})")
+        raise BackendUnavailableError(
+            "SAM3 segmenter backend unavailable: "
+            + "; ".join(backend_errors)
+            + ". Remediation: install the sam3 package (or ultralytics SAM "
+              "weights) — no masks were fabricated."
+        )
     
     def segment_from_boxes(
         self,
@@ -523,11 +572,18 @@ class SAM3Segmenter:
         if self._model is None:
             self._load_model()
         
+        # Real SAM3 inference; a None mask means the model produced no mask
+        # for that prompt — it is never a placeholder for a missing backend.
         masks = []
         for box in boxes:
-            # Placeholder - actual SAM3 inference
-            masks.append(None)
-        
+            xyxy = [box.x1, box.y1, box.x2, box.y2]
+            if self._backend == "ultralytics":
+                res = self._model(image, bboxes=[xyxy])
+                masks.append(res[0].masks.data[0].cpu().numpy()
+                             if res and res[0].masks is not None else None)
+            else:
+                mask, _scores = self._model.predict(box=np.asarray(xyxy))
+                masks.append(mask)
         return masks
     
     def segment_from_points(
@@ -539,11 +595,18 @@ class SAM3Segmenter:
         if self._model is None:
             self._load_model()
         
+        # Real SAM3 point-prompt inference (None = model found no mask).
         masks = []
         for point in points:
-            # Placeholder - actual SAM3 inference
-            masks.append(None)
-        
+            if self._backend == "ultralytics":
+                res = self._model(image, points=[[point[0], point[1]]], labels=[1])
+                masks.append(res[0].masks.data[0].cpu().numpy()
+                             if res and res[0].masks is not None else None)
+            else:
+                mask, _scores = self._model.predict(
+                    point_coords=np.asarray([[point[0], point[1]]]),
+                    point_labels=np.asarray([1]))
+                masks.append(mask)
         return masks
     
     def auto_segment(self, image: Any) -> List[Any]:
@@ -551,8 +614,14 @@ class SAM3Segmenter:
         if self._model is None:
             self._load_model()
         
-        # Placeholder - actual SAM3 auto-segmentation
-        return []
+        # Real SAM3 automatic segmentation; empty list ONLY when the model
+        # genuinely produced no masks.
+        if self._backend == "ultralytics":
+            res = self._model(image)
+            if not res or res[0].masks is None:
+                return []
+            return [m.cpu().numpy() for m in res[0].masks.data]
+        return self._model.auto_mask(image)
 
 
 # =============================================================================
@@ -575,18 +644,44 @@ class VJEPAEmbedder:
         self._embedding_cache: Dict[str, Any] = {}
     
     def _load_model(self) -> None:
-        """Load V-JEPA model."""
+        """Load V-JEPA model: bridge to the real api.jepa.torch_core JEPAModel.
+
+        Raises BackendUnavailableError when the JEPA backend (torch) is not
+        available — embeddings are never fabricated.
+        """
+        jepa_mod = None
+        for modname in ("src.api.jepa.torch_core", "api.jepa.torch_core"):
+            try:
+                import importlib
+                jepa_mod = importlib.import_module(modname)
+                break
+            except ImportError:
+                continue
+        if jepa_mod is None or not jepa_mod.TORCH_AVAILABLE:
+            raise BackendUnavailableError(
+                "V-JEPA embedder unavailable: api.jepa.torch_core (PyTorch "
+                "I-JEPA) is not importable or torch is not installed. "
+                "Remediation: install torch, or disable V-JEPA embeddings in "
+                "the pipeline config. No random embeddings were fabricated."
+            )
         logger.info(f"Loading V-JEPA model: {self.model_path}")
-        self._model = {"loaded": True}  # Placeholder
+        if self.model_path and os.path.exists(str(self.model_path)):
+            self._model = jepa_mod.JEPAModel.load(self.model_path)
+        else:
+            # untrained-but-real I-JEPA encoders (honest: the actual
+            # architecture, random-init weights — not random numbers)
+            self._model = jepa_mod.JEPAModel()
     
     def embed_frames(self, frames: List[Any]) -> Any:
         """Get embedding for video frames."""
         if self._model is None:
             self._load_model()
         
-        # Placeholder - actual V-JEPA inference
         import numpy as np
-        return np.random.randn(768)  # Placeholder embedding
+        embs = [self._model.embed_image(f) for f in frames]
+        emb = np.mean(np.stack(embs), axis=0)
+        norm = np.linalg.norm(emb)
+        return (emb / norm) if norm > 0 else emb
     
     def embed_video(self, video_path: str) -> Any:
         """Get embedding for video file."""
@@ -597,10 +692,32 @@ class VJEPAEmbedder:
         if self._model is None:
             self._load_model()
         
-        # Placeholder - actual V-JEPA inference
-        import numpy as np
-        embedding = np.random.randn(768)
-        
+        # Real path: decode frames (opencv lazy) and embed them
+        try:
+            import cv2  # lazy optional dep
+        except ImportError as e:
+            raise BackendUnavailableError(
+                "V-JEPA video embedding requires opencv (cv2) to decode "
+                f"'{video_path}'. Remediation: pip install opencv-python, "
+                "or pass decoded frames to embed_frames()."
+            ) from e
+        cap = cv2.VideoCapture(str(video_path))
+        frames = []
+        idx = 0
+        ok, frame = cap.read()
+        while ok:
+            if idx % self.frame_sample_rate == 0:
+                frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            idx += 1
+            ok, frame = cap.read()
+        cap.release()
+        if not frames:
+            raise BackendUnavailableError(
+                f"V-JEPA could not decode any frames from '{video_path}' "
+                "(missing/corrupt video or unsupported codec)."
+            )
+        embedding = self.embed_frames(frames)
+
         self._embedding_cache[video_path] = embedding
         return embedding
     
