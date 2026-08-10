@@ -20,6 +20,11 @@ type Config struct {
 	DaprHTTPPort          string
 	TigerBeetleAddresses  string
 	LakehouseWarehouse    string
+	// AllowMock explicitly opts in to fabricated mock behavior
+	// (MV_ORCH_ALLOW_MOCK=true). Without it, unimplemented middleware
+	// clients fail loudly instead of silently dropping data or
+	// fabricating identities/permissions.
+	AllowMock bool
 }
 
 // Status represents the connection status of a middleware component
@@ -43,12 +48,34 @@ type Client struct {
 	daprConnected        bool
 	tigerbeetleConnected bool
 	lakehouseConnected   bool
+
+	// allowMock gates all fabricated behavior (see Config.AllowMock)
+	allowMock bool
+
+	// per-component explanation when not connected (surfaced in GetStatus)
+	kafkaErr       string
+	fluvioErr      string
+	redisErr       string
+	tigerbeetleErr string
+	lakehouseErr   string
+}
+
+// errMockDisabled is returned by every operation whose only implementation
+// is a mock, when MV_ORCH_ALLOW_MOCK is not set. Production paths fail
+// honestly instead of fabricating success.
+func (c *Client) errMockDisabled(component string) error {
+	return fmt.Errorf(
+		"%s: no real client implemented and mock mode disabled "+
+			"(set MV_ORCH_ALLOW_MOCK=true to explicitly enable fabricated mock behavior)",
+		component,
+	)
 }
 
 // NewMiddlewareClient creates a new middleware client
 func NewMiddlewareClient(config Config) (*Client, error) {
 	c := &Client{
-		config: config,
+		config:    config,
+		allowMock: config.AllowMock,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -75,29 +102,39 @@ func (c *Client) connectAll() {
 // GetStatus returns the status of all middleware connections
 func (c *Client) GetStatus() map[string]Status {
 	return map[string]Status{
-		"kafka":       {Name: "Kafka", Connected: c.kafkaConnected},
-		"fluvio":      {Name: "Fluvio", Connected: c.fluvioConnected},
-		"redis":       {Name: "Redis", Connected: c.redisConnected},
+		"kafka":       {Name: "Kafka", Connected: c.kafkaConnected, Error: c.kafkaErr},
+		"fluvio":      {Name: "Fluvio", Connected: c.fluvioConnected, Error: c.fluvioErr},
+		"redis":       {Name: "Redis", Connected: c.redisConnected, Error: c.redisErr},
 		"keycloak":    {Name: "Keycloak", Connected: c.keycloakConnected},
 		"permify":     {Name: "Permify", Connected: c.permifyConnected},
 		"dapr":        {Name: "Dapr", Connected: c.daprConnected},
-		"tigerbeetle": {Name: "TigerBeetle", Connected: c.tigerbeetleConnected},
-		"lakehouse":   {Name: "Lakehouse", Connected: c.lakehouseConnected},
+		"tigerbeetle": {Name: "TigerBeetle", Connected: c.tigerbeetleConnected, Error: c.tigerbeetleErr},
+		"lakehouse":   {Name: "Lakehouse", Connected: c.lakehouseConnected, Error: c.lakehouseErr},
 	}
+}
+
+// mockNote returns the honest status note for an unimplemented component.
+func (c *Client) mockNote() string {
+	if c.allowMock {
+		return "mock mode (MV_ORCH_ALLOW_MOCK=true); no real client implemented"
+	}
+	return "no real client implemented; mock mode disabled (MV_ORCH_ALLOW_MOCK not set)"
 }
 
 // Kafka operations
 
 func (c *Client) connectKafka() {
 	// In production, would use segmentio/kafka-go
-	// For now, mark as connected in mock mode
 	c.kafkaConnected = false
+	c.kafkaErr = c.mockNote()
 }
 
 // PublishKafka publishes a message to Kafka
 func (c *Client) PublishKafka(topic string, event map[string]interface{}) error {
 	if !c.kafkaConnected {
-		// Mock mode - log the event
+		if !c.allowMock {
+			return c.errMockDisabled("PublishKafka")
+		}
 		fmt.Printf("[Mock Kafka] Publishing to %s: %v\n", topic, event)
 		return nil
 	}
@@ -110,11 +147,15 @@ func (c *Client) PublishKafka(topic string, event map[string]interface{}) error 
 
 func (c *Client) connectFluvio() {
 	c.fluvioConnected = false
+	c.fluvioErr = c.mockNote()
 }
 
 // PublishFluvio publishes a message to Fluvio
 func (c *Client) PublishFluvio(topic string, event map[string]interface{}) error {
 	if !c.fluvioConnected {
+		if !c.allowMock {
+			return c.errMockDisabled("PublishFluvio")
+		}
 		fmt.Printf("[Mock Fluvio] Publishing to %s: %v\n", topic, event)
 		return nil
 	}
@@ -126,11 +167,15 @@ func (c *Client) PublishFluvio(topic string, event map[string]interface{}) error
 func (c *Client) connectRedis() {
 	// In production, would use go-redis
 	c.redisConnected = false
+	c.redisErr = c.mockNote()
 }
 
 // CacheToRedis caches a value in Redis
 func (c *Client) CacheToRedis(key string, value interface{}, ttlSeconds int) error {
 	if !c.redisConnected {
+		if !c.allowMock {
+			return c.errMockDisabled("CacheToRedis")
+		}
 		fmt.Printf("[Mock Redis] SET %s (TTL: %ds)\n", key, ttlSeconds)
 		return nil
 	}
@@ -140,6 +185,10 @@ func (c *Client) CacheToRedis(key string, value interface{}, ttlSeconds int) err
 // GetFromRedis gets a value from Redis
 func (c *Client) GetFromRedis(key string) (interface{}, error) {
 	if !c.redisConnected {
+		if !c.allowMock {
+			return nil, c.errMockDisabled("GetFromRedis")
+		}
+		fmt.Printf("[Mock Redis] GET %s -> (nil)\n", key)
 		return nil, nil
 	}
 	return nil, nil
@@ -167,7 +216,16 @@ func (c *Client) connectKeycloak() {
 // ValidateToken validates a JWT token with Keycloak
 func (c *Client) ValidateToken(token string) (map[string]interface{}, error) {
 	if !c.keycloakConnected {
-		return map[string]interface{}{"sub": "mock-user", "preferred_username": "mock"}, nil
+		if !c.allowMock {
+			// Never fabricate an authenticated identity in production mode.
+			return nil, c.errMockDisabled("ValidateToken")
+		}
+		return map[string]interface{}{
+			"sub":                 "mock-user",
+			"preferred_username":  "mock",
+			"mock":                true,
+			"mock_warning":        "fabricated identity (MV_ORCH_ALLOW_MOCK=true)",
+		}, nil
 	}
 
 	req, _ := http.NewRequest("GET", c.config.KeycloakURL+"/realms/"+c.config.KeycloakRealm+"/protocol/openid-connect/userinfo", nil)
@@ -205,7 +263,11 @@ func (c *Client) connectPermify() {
 // CheckPermission checks if a user has a permission
 func (c *Client) CheckPermission(userID, permission, resourceID string) (bool, error) {
 	if !c.permifyConnected {
-		// Allow in mock mode
+		if !c.allowMock {
+			// Never silently authorize in production mode.
+			return false, c.errMockDisabled("CheckPermission")
+		}
+		fmt.Printf("[Mock Permify] Allowing %s to %s on %s (mock mode)\n", userID, permission, resourceID)
 		return true, nil
 	}
 
@@ -234,7 +296,10 @@ func (c *Client) connectDapr() {
 // InvokeService invokes a service via Dapr
 func (c *Client) InvokeService(appID, method string, data map[string]interface{}) (map[string]interface{}, error) {
 	if !c.daprConnected {
-		return map[string]interface{}{"status": "mock", "app_id": appID, "method": method}, nil
+		if !c.allowMock {
+			return nil, c.errMockDisabled("InvokeService")
+		}
+		return map[string]interface{}{"status": "mock", "mock": true, "app_id": appID, "method": method}, nil
 	}
 
 	// In production, would call Dapr invoke API
@@ -246,11 +311,16 @@ func (c *Client) InvokeService(appID, method string, data map[string]interface{}
 func (c *Client) connectTigerBeetle() {
 	// In production, would use tigerbeetle-go client
 	c.tigerbeetleConnected = false
+	c.tigerbeetleErr = c.mockNote()
 }
 
 // WriteLedgerEntry writes an entry to TigerBeetle
 func (c *Client) WriteLedgerEntry(entryType string, data map[string]interface{}) (string, error) {
 	if !c.tigerbeetleConnected {
+		if !c.allowMock {
+			// Financial ledger writes must never be silently dropped.
+			return "", c.errMockDisabled("WriteLedgerEntry")
+		}
 		entryID := fmt.Sprintf("mock-entry-%d", time.Now().UnixNano())
 		fmt.Printf("[Mock TigerBeetle] Writing entry %s: %s\n", entryType, entryID)
 		return entryID, nil
@@ -265,11 +335,15 @@ func (c *Client) WriteLedgerEntry(entryType string, data map[string]interface{})
 func (c *Client) connectLakehouse() {
 	// In production, would use iceberg-go
 	c.lakehouseConnected = false
+	c.lakehouseErr = c.mockNote()
 }
 
 // StoreToLakehouse stores data to the lakehouse
 func (c *Client) StoreToLakehouse(table string, data map[string]interface{}) (string, error) {
 	if !c.lakehouseConnected {
+		if !c.allowMock {
+			return "", c.errMockDisabled("StoreToLakehouse")
+		}
 		recordID := fmt.Sprintf("mock-record-%d", time.Now().UnixNano())
 		fmt.Printf("[Mock Lakehouse] Storing to %s: %s\n", table, recordID)
 		return recordID, nil
@@ -282,6 +356,9 @@ func (c *Client) StoreToLakehouse(table string, data map[string]interface{}) (st
 // QueryLakehouse queries data from the lakehouse
 func (c *Client) QueryLakehouse(ctx context.Context, table string, filters map[string]interface{}) ([]map[string]interface{}, error) {
 	if !c.lakehouseConnected {
+		if !c.allowMock {
+			return nil, c.errMockDisabled("QueryLakehouse")
+		}
 		return []map[string]interface{}{}, nil
 	}
 

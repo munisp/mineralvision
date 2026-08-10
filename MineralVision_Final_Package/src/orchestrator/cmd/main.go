@@ -45,8 +45,15 @@ func main() {
 		Namespace: config.Temporal.Namespace,
 	})
 	if err != nil {
-		sugar.Warnw("Failed to connect to Temporal, running in mock mode", "error", err)
 		temporalClient = nil
+		if config.Middleware.AllowMock {
+			sugar.Warnw("Failed to connect to Temporal, running in explicitly opted-in mock mode (MV_ORCH_ALLOW_MOCK=true)", "error", err)
+		} else {
+			// Honest mode: the service stays up for /health and journey
+			// listings, but every workflow-execution endpoint returns 503
+			// "temporal unavailable" instead of fabricating fake runs.
+			sugar.Warnw("Failed to connect to Temporal; workflow endpoints will return 503 (set MV_ORCH_ALLOW_MOCK=true to enable mock mode)", "error", err)
+		}
 	}
 
 	// Load journey registry
@@ -84,7 +91,7 @@ func main() {
 	}
 
 	// Create HTTP server
-	router := setupRouter(temporalClient, registry, mw, sugar)
+	router := setupRouter(temporalClient, registry, mw, sugar, config.Middleware.AllowMock)
 
 	srv := &http.Server{
 		Addr:    ":" + config.Server.Port,
@@ -130,8 +137,23 @@ func setupRouter(
 	registry *journeys.Registry,
 	mw *middleware.Client,
 	logger *zap.SugaredLogger,
+	allowMock bool,
 ) *gin.Engine {
 	router := gin.Default()
+
+	// temporalUnavailable is the honest response when Temporal is down and
+	// mock mode is not explicitly enabled.
+	temporalUnavailable := func(c *gin.Context) bool {
+		if temporalClient != nil || allowMock {
+			return false
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "temporal unavailable",
+			"detail":  "workflow engine not connected and mock mode disabled; set MV_ORCH_ALLOW_MOCK=true to enable fabricated mock responses",
+			"mock":    false,
+		})
+		return true
+	}
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
@@ -188,13 +210,18 @@ func setupRouter(
 			workflowID := journeys.GenerateWorkflowID(id)
 
 			if temporalClient == nil {
-				// Mock mode
+				if temporalUnavailable(c) {
+					return
+				}
+				// Mock mode (explicitly opted in via MV_ORCH_ALLOW_MOCK=true)
 				c.JSON(http.StatusOK, gin.H{
 					"workflow_id": workflowID,
 					"run_id":      "mock-run-" + workflowID,
 					"journey_id":  id,
 					"status":      "running",
 					"started_at":  time.Now().UTC().Format(time.RFC3339),
+					"mock":        true,
+					"mock_detail": "fabricated run — no Temporal workflow was started",
 				})
 				return
 			}
@@ -245,6 +272,9 @@ func setupRouter(
 			workflowID := c.Param("workflow_id")
 
 			if temporalClient == nil {
+				if temporalUnavailable(c) {
+					return
+				}
 				c.JSON(http.StatusOK, gin.H{
 					"workflow_id": workflowID,
 					"status":      "completed",
@@ -282,7 +312,10 @@ func setupRouter(
 			}
 
 			if temporalClient == nil {
-				c.JSON(http.StatusOK, gin.H{"status": "mock signal sent"})
+				if temporalUnavailable(c) {
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"status": "mock signal sent", "mock": true})
 				return
 			}
 
@@ -305,7 +338,10 @@ func setupRouter(
 			workflowID := c.Param("workflow_id")
 
 			if temporalClient == nil {
-				c.JSON(http.StatusOK, gin.H{"status": "mock cancelled"})
+				if temporalUnavailable(c) {
+					return
+				}
+				c.JSON(http.StatusOK, gin.H{"status": "mock cancelled", "mock": true})
 				return
 			}
 
@@ -368,6 +404,10 @@ func loadConfig() *Config {
 		DaprHTTPPort:          getEnv("DAPR_HTTP_PORT", "3500"),
 		TigerBeetleAddresses:  getEnv("TIGERBEETLE_ADDRESSES", "127.0.0.1:3000"),
 		LakehouseWarehouse:    getEnv("LAKEHOUSE_WAREHOUSE", "s3://mineralvision-lakehouse"),
+		// Explicit opt-in to fabricated mock behavior. Without this flag the
+		// orchestrator fails honestly: workflow endpoints return 503 and
+		// unimplemented middleware calls return errors.
+		AllowMock: os.Getenv("MV_ORCH_ALLOW_MOCK") == "true",
 	}
 
 	return config
