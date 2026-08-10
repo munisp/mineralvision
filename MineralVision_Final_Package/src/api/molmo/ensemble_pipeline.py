@@ -24,6 +24,14 @@ import threading
 logger = logging.getLogger(__name__)
 
 
+class BackendUnavailableError(RuntimeError):
+    """Raised when a detector/segmenter/embedder backend cannot be loaded.
+
+    The pipeline never fabricates detections, masks, or embeddings: an empty
+    result list is returned ONLY when a real model ran and found nothing.
+    """
+
+
 # =============================================================================
 # ENSEMBLE CONFIGURATION
 # =============================================================================
@@ -671,14 +679,39 @@ class VJEPAEmbedder:
             # untrained-but-real I-JEPA encoders (honest: the actual
             # architecture, random-init weights — not random numbers)
             self._model = jepa_mod.JEPAModel()
+        self._img_size = self._model.config.img_size
     
+    @staticmethod
+    def _resize_hwc(arr, size: int):
+        """Resize an [H,W,C] frame to (size, size) with area interpolation."""
+        import numpy as np
+        try:
+            import cv2  # lazy
+            return cv2.resize(arr, (size, size), interpolation=cv2.INTER_AREA)
+        except ImportError:
+            from PIL import Image  # lazy
+            img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8)
+                                  if arr.dtype != np.uint8 else arr)
+            return np.asarray(img.resize((size, size), Image.BILINEAR),
+                              dtype=np.float32)
+
     def embed_frames(self, frames: List[Any]) -> Any:
-        """Get embedding for video frames."""
+        """Get embedding for video frames (real JEPA target encoder)."""
         if self._model is None:
             self._load_model()
         
         import numpy as np
-        embs = [self._model.embed_image(f) for f in frames]
+        norm_frames = []
+        for f in frames:
+            arr = np.asarray(f)
+            # JEPAModel expects [H,W,3]; accept [3,H,W] inputs transparently
+            if arr.ndim == 3 and arr.shape[0] in (1, 3) and arr.shape[-1] not in (1, 3):
+                arr = np.transpose(arr, (1, 2, 0))
+            # resize to the encoder's configured input size if needed
+            if arr.shape[0] != self._img_size or arr.shape[1] != self._img_size:
+                arr = self._resize_hwc(arr, self._img_size)
+            norm_frames.append(arr)
+        embs = [self._model.embed_image(f) for f in norm_frames]
         emb = np.mean(np.stack(embs), axis=0)
         norm = np.linalg.norm(emb)
         return (emb / norm) if norm > 0 else emb
