@@ -90,8 +90,8 @@ class WellLogLAS:
 
 # Header line:  MNEMONIC.UNIT  VALUE : DESCRIPTION
 _HEADER_RE = re.compile(
-    r"^\s*(?P<mnemonic>[^.\s:]+)\s*\.\s*(?P<unit>[^\s:]*)\s*"
-    r"(?P<value>[^:]*?)\s*(?::\s*(?P<desc>.*))?$"
+    r"^\s*(?P<mnemonic>[^.\s:]+)\s*\.(?P<unit>[^\s:]*)"
+    r"(?:\s+(?P<value>[^:]*?))?\s*(?::\s*(?P<desc>.*))?$"
 )
 
 

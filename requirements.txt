@@ -65,6 +65,10 @@ pyarrow==25.0.0
 deltalake==1.6.2
 h5py==3.16.0
 laspy==2.7.0
+# Optional: LAZ (LASzip-compressed) decompression backend for laspy.
+# Uncomment to enable .laz ingestion (/innovations/hardware-ingest/lidar/las);
+# without it, .laz uploads fail honestly with 503 + remediation (never fabricated).
+# lazrs==3.0.0
 
 # Utilities
 python-dotenv==1.2.2
