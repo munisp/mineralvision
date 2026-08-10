@@ -221,6 +221,35 @@ export const sensorFusionApi = {
   getResults: () => api.get('/api/sensor-fusion/results'),
 };
 
+export interface OnboardingOrg {
+  id: number;
+  name: string;
+  slug: string;
+  status: string;
+  my_role?: string;
+}
+
+export interface InviteResult {
+  invitation_id: number;
+  org_id: number;
+  email: string;
+  role: string;
+  expires_at: string;
+  email_delivery: string;
+}
+
+export const onboardingApi = {
+  myOrgs: () => api.get<{ organizations: OnboardingOrg[] }>('/innovations/onboarding/orgs-mine'),
+  invite: (orgId: number, data: { email: string; role: string }) =>
+    api.post<InviteResult>(`/innovations/onboarding/orgs/${orgId}/invitations`, data),
+  validateInvite: (token: string) =>
+    api.get<{ email: string; role: string; org: OnboardingOrg | null; expires_at: string }>(
+      `/innovations/onboarding/invitations/${token}`
+    ),
+  acceptInvite: (token: string, data: { password: string; full_name?: string }) =>
+    api.post(`/innovations/onboarding/invitations/${token}/accept`, data),
+};
+
 export const usersApi = {
   list: () => api.get('/api/users'),
   get: (id: string) => api.get(`/api/users/${id}`),

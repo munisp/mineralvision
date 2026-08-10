@@ -165,6 +165,12 @@ export const useAuthStore = create<AuthState>()(
           resource_geologist: ['read', 'write', 'execute', 'export'],
           geologist: ['read', 'write', 'execute'],
           viewer: ['read'],
+          field_technician: ['read', 'write'],
+          investor: ['read'],
+          regulator: ['read', 'export'],
+          custodian: ['read', 'write', 'share'],
+          org_admin: ['read', 'write', 'admin'],
+          qualified_person: ['read', 'write', 'execute', 'approve', 'export'],
         };
         
         for (const role of user.roles) {

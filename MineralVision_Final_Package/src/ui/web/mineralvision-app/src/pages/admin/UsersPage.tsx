@@ -10,7 +10,8 @@ import {
   Wifi,
   WifiOff,
 } from 'lucide-react';
-import { usersApi } from '../../services/api';
+import { AxiosError } from 'axios';
+import { onboardingApi, usersApi } from '../../services/api';
 
 interface UserData {
   id: string;
@@ -283,47 +284,106 @@ export default function UsersPage() {
   );
 }
 
+const INVITABLE_ROLES = [
+  'viewer',
+  'geologist',
+  'resource_geologist',
+  'field_technician',
+  'investor',
+  'regulator',
+  'custodian',
+  'org_admin',
+];
+
 function NewUserModal({ onClose }: { onClose: () => void }) {
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('viewer');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setFeedback(null);
+    try {
+      // Invite into the first organization the current user belongs to.
+      const orgsResponse = await onboardingApi.myOrgs();
+      const org = orgsResponse.data.organizations[0];
+      if (!org) {
+        setFeedback({
+          kind: 'error',
+          message: 'You do not belong to any organization yet. Create one before inviting.',
+        });
+        return;
+      }
+      const result = await onboardingApi.invite(org.id, { email, role });
+      setFeedback({
+        kind: 'success',
+        message: `Invitation sent to ${result.data.email} (${result.data.role}) in ${org.name} — delivery: ${result.data.email_delivery}.`,
+      });
+    } catch (err) {
+      const detail = (err as AxiosError)?.response?.data as { detail?: string } | undefined;
+      setFeedback({
+        kind: 'error',
+        message: detail?.detail || 'Failed to send invitation. Please try again.',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
       <div className="bg-card border border-border rounded-xl w-full max-w-md">
         <div className="p-6 border-b border-border">
-          <h2 className="text-xl font-semibold text-foreground">Add New User</h2>
+          <h2 className="text-xl font-semibold text-foreground">Invite Stakeholder</h2>
         </div>
-        <form className="p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">First Name</label>
-              <input type="text" className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-foreground mb-1.5">Last Name</label>
-              <input type="text" className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">Username</label>
-            <input type="text" className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
-          </div>
+        <form className="p-6 space-y-4" onSubmit={handleSubmit}>
           <div>
             <label className="block text-sm font-medium text-foreground mb-1.5">Email</label>
-            <input type="email" className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground" />
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground"
+            />
           </div>
           <div>
             <label className="block text-sm font-medium text-foreground mb-1.5">Role</label>
-            <select className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground">
-              <option value="viewer">Viewer</option>
-              <option value="geologist">Geologist</option>
-              <option value="resource_geologist">Resource Geologist</option>
-              <option value="admin">Admin</option>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              className="w-full px-3 py-2 bg-background border border-input rounded-lg text-foreground"
+            >
+              {INVITABLE_ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {r.replace(/_/g, ' ')}
+                </option>
+              ))}
             </select>
           </div>
+          {feedback && (
+            <div
+              className={`text-sm px-3 py-2 rounded-lg ${
+                feedback.kind === 'success'
+                  ? 'bg-green-500/10 text-green-500'
+                  : 'bg-red-500/10 text-red-500'
+              }`}
+            >
+              {feedback.message}
+            </div>
+          )}
           <div className="flex gap-3 pt-4">
             <button type="button" onClick={onClose} className="flex-1 px-4 py-2 border border-input rounded-lg text-foreground hover:bg-secondary">
               Cancel
             </button>
-            <button type="submit" className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90">
-              Send Invite
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+            >
+              {isSubmitting ? 'Sending…' : 'Send Invite'}
             </button>
           </div>
         </form>
