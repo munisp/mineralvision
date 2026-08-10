@@ -1,4 +1,5 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { drillholesApi, projectsApi, Drillhole as ApiDrillhole } from '../../services/api';
 import { useDropzone } from 'react-dropzone';
 import {
   Search,
@@ -24,16 +25,6 @@ interface Drillhole {
   avgGrade: number | null;
 }
 
-const mockDrillholes: Drillhole[] = [
-  { id: '1', holeId: 'DDH-2024-156', project: 'Copper Ridge', collar: { x: 456789, y: 7654321, z: 1250 }, totalDepth: 450, azimuth: 45, dip: -60, status: 'completed', assayCount: 45, avgGrade: 0.85 },
-  { id: '2', holeId: 'DDH-2024-155', project: 'Copper Ridge', collar: { x: 456812, y: 7654298, z: 1248 }, totalDepth: 380, azimuth: 45, dip: -60, status: 'completed', assayCount: 38, avgGrade: 1.12 },
-  { id: '3', holeId: 'DDH-2024-154', project: 'Copper Ridge', collar: { x: 456756, y: 7654345, z: 1252 }, totalDepth: 520, azimuth: 90, dip: -55, status: 'completed', assayCount: 52, avgGrade: 0.72 },
-  { id: '4', holeId: 'DDH-2024-153', project: 'Copper Ridge', collar: { x: 456801, y: 7654312, z: 1249 }, totalDepth: 290, azimuth: 45, dip: -60, status: 'in-progress', assayCount: 15, avgGrade: null },
-  { id: '5', holeId: 'DDH-2024-152', project: 'Copper Ridge', collar: { x: 456778, y: 7654334, z: 1251 }, totalDepth: 410, azimuth: 135, dip: -65, status: 'completed', assayCount: 41, avgGrade: 0.95 },
-  { id: '6', holeId: 'GV-2024-089', project: 'Golden Valley', collar: { x: 523456, y: 6789012, z: 380 }, totalDepth: 320, azimuth: 0, dip: -90, status: 'completed', assayCount: 64, avgGrade: 2.45 },
-  { id: '7', holeId: 'GV-2024-088', project: 'Golden Valley', collar: { x: 523478, y: 6789034, z: 382 }, totalDepth: 280, azimuth: 0, dip: -90, status: 'completed', assayCount: 56, avgGrade: 3.12 },
-  { id: '8', holeId: 'LF-2024-012', project: 'Lithium Flats', collar: { x: 612345, y: 7456789, z: 2340 }, totalDepth: 150, azimuth: 0, dip: -90, status: 'completed', assayCount: 30, avgGrade: 850 },
-];
 
 const statusColors = {
   completed: 'bg-green-500/10 text-green-500',
@@ -46,14 +37,56 @@ export default function DrillholesPage() {
   const [projectFilter, setProjectFilter] = useState('all');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedHoles, setSelectedHoles] = useState<string[]>([]);
+  const [drillholes, setDrillholes] = useState<Drillhole[]>([]);
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const filteredDrillholes = mockDrillholes.filter((hole) => {
+  // Live data: drillhole register + project names from the backend.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadState('loading');
+      try {
+        const [holesResp, projectsResp] = await Promise.all([
+          drillholesApi.list(),
+          projectsApi.list(),
+        ]);
+        if (cancelled) return;
+        const projectNames = new Map(projectsResp.data.map((p) => [p.id, p.name]));
+        const mapped: Drillhole[] = holesResp.data.map((h: ApiDrillhole) => ({
+          id: h.id,
+          holeId: h.holeId,
+          project: projectNames.get(h.projectId) ?? h.projectId,
+          collar: h.collar,
+          totalDepth: h.totalDepth,
+          azimuth: h.azimuth ?? 0,
+          dip: h.dip ?? -90,
+          status: (h.status as Drillhole['status']) ?? 'planned',
+          assayCount: h.assayCount,
+          // The list endpoint does not compute average grades; shown as '-'.
+          avgGrade: null,
+        }));
+        setDrillholes(mapped);
+        setLoadState('ready');
+      } catch (err) {
+        if (!cancelled) {
+          setLoadState('error');
+          setErrorMessage(err instanceof Error ? err.message : 'Failed to load drillholes');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const filteredDrillholes = drillholes.filter((hole) => {
     const matchesSearch = hole.holeId.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesProject = projectFilter === 'all' || hole.project === projectFilter;
     return matchesSearch && matchesProject;
   });
 
-  const projects = [...new Set(mockDrillholes.map((h) => h.project))];
+  const projects = [...new Set(drillholes.map((h) => h.project))];
 
   const toggleSelectAll = () => {
     if (selectedHoles.length === filteredDrillholes.length) {
@@ -127,6 +160,22 @@ export default function DrillholesPage() {
         </div>
       )}
 
+      {loadState === 'loading' && (
+        <div className="bg-card border border-border rounded-xl p-10 text-center text-sm text-muted-foreground">
+          Loading drillholes…
+        </div>
+      )}
+      {loadState === 'error' && (
+        <div className="bg-destructive/10 border border-destructive/40 text-destructive rounded-xl p-4 text-sm">
+          Failed to load drillholes: {errorMessage}
+        </div>
+      )}
+      {loadState === 'ready' && drillholes.length === 0 && (
+        <div className="bg-card border border-border rounded-xl p-10 text-center text-sm text-muted-foreground">
+          No drillholes in the register. Upload a collar file or create drillholes via the API.
+        </div>
+      )}
+      {loadState === 'ready' && drillholes.length > 0 && (
       <div className="bg-card border border-border rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -197,6 +246,7 @@ export default function DrillholesPage() {
           </table>
         </div>
       </div>
+      )}
 
       {showUploadModal && (
         <UploadModal onClose={() => setShowUploadModal(false)} />
@@ -224,9 +274,20 @@ function UploadModal({ onClose }: { onClose: () => void }) {
 
   const handleUpload = async () => {
     setUploading(true);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-    setUploading(false);
-    onClose();
+    // Upload requires a project id; use the first project from the register.
+    try {
+      const { projectsApi, drillholesApi } = await import('../../services/api');
+      const projects = (await projectsApi.list()).data;
+      if (!projects[0]) throw new Error('No project exists — create a project first.');
+      for (const file of files) {
+        await drillholesApi.upload(file, projects[0].id);
+      }
+      onClose();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
