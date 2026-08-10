@@ -5,6 +5,7 @@ This module implements deep learning models for mineral deposit prediction based
 multiple data sources including geological, geophysical, geochemical, and remote sensing data.
 """
 
+import logging
 import os
 import numpy as np
 import torch
@@ -20,6 +21,21 @@ import tensorflow_probability as tfp
 import pandas as pd
 import geopandas as gpd
 from typing import Dict, List, Tuple, Optional, Union
+
+logger = logging.getLogger(__name__)
+
+MOCK_FALLBACK_ENV = "MV_ALLOW_MOCK_FALLBACK"
+
+
+def mock_fallback_allowed() -> bool:
+    """True only when MV_ALLOW_MOCK_FALLBACK=true is explicitly set."""
+    return os.environ.get(MOCK_FALLBACK_ENV, "").strip().lower() == "true"
+
+
+class DataUnavailableError(RuntimeError):
+    """Raised when real training data cannot be assembled and the synthetic
+    fallback is not explicitly enabled (MV_ALLOW_MOCK_FALLBACK=true)."""
+
 
 class MineralDepositDataset(Dataset):
     """
@@ -68,6 +84,9 @@ class MineralDepositDataset(Dataset):
             historical_data
         )
         
+        # Set by _prepare_data when the synthetic fallback path is used
+        self.synthetic = False
+
         # Extract features and targets
         self.features, self.targets = self._prepare_data()
         
@@ -154,7 +173,26 @@ class MineralDepositDataset(Dataset):
             )
         
         if merged_data is None:
-            # Create dummy data for demonstration
+            # No mergeable real data (need geological + historical on
+            # location_id). NEVER silently train on random data: raise unless
+            # the operator explicitly opted into synthetic demo data.
+            if not mock_fallback_allowed():
+                raise DataUnavailableError(
+                    "Cannot assemble a real training set: geological and "
+                    "historical datasets sharing a 'location_id' key are "
+                    "required and were not provided/mergeable. Remediation: "
+                    "supply geological_data and historical_data files with a "
+                    "common location_id column. For demonstration-only runs, "
+                    "set MV_ALLOW_MOCK_FALLBACK=true — the resulting metrics "
+                    "will be tagged synthetic."
+                )
+            logger.warning(
+                "MV DEGRADED MODE: MineralDepositDataset using SYNTHETIC random "
+                "training data because %s=true. Metrics from this run are NOT "
+                "real model performance — do NOT use in production.",
+                MOCK_FALLBACK_ENV,
+            )
+            self.synthetic = True
             n_samples = 1000
             n_features = 50
             features = np.random.randn(n_samples, n_features)
@@ -820,6 +858,7 @@ class MineralDepositPredictionService:
         self.model_path = model_path
         self.data_dir = data_dir
         self.mlflow_tracking_uri = mlflow_tracking_uri
+        self.last_training_synthetic = False
         self.uncertainty_estimation = uncertainty_estimation
         
         # Set up MLflow tracking
@@ -896,6 +935,8 @@ class MineralDepositPredictionService:
                 remote_sensing_data,
                 historical_data
             )
+            self.last_training_synthetic = getattr(dataset, "synthetic", False)
+            mlflow.log_param("synthetic_training_data", self.last_training_synthetic)
             
             # Split data
             train_size = int(0.7 * len(dataset))

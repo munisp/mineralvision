@@ -28,6 +28,19 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
+MOCK_FALLBACK_ENV = "MV_ALLOW_MOCK_FALLBACK"
+
+
+def mock_fallback_allowed() -> bool:
+    """True only when MV_ALLOW_MOCK_FALLBACK=true is explicitly set."""
+    import os
+    return os.environ.get(MOCK_FALLBACK_ENV, "").strip().lower() == "true"
+
+
+class DemonstrationWorkflowError(RuntimeError):
+    """Raised when a reference (demonstration) workflow is executed without
+    explicitly opting into simulated outputs via MV_ALLOW_MOCK_FALLBACK=true."""
+
 
 class WorkflowStage(Enum):
     """Workflow execution stages."""
@@ -164,6 +177,7 @@ class WorkflowResult:
     final_targets: List[Dict[str, Any]]
     execution_time: float
     reproducibility_hash: str
+    simulated: bool = False
     created_at: datetime = field(default_factory=datetime.now)
     
     def to_dict(self) -> Dict[str, Any]:
@@ -175,6 +189,7 @@ class WorkflowResult:
                       for i in self.inputs],
             'stages': {s.value: {'status': r.status, 'duration': r.duration_seconds}
                       for s, r in self.stages.items()},
+            'simulated': self.simulated,
             'n_targets': len(self.final_targets),
             'execution_time': self.execution_time,
             'reproducibility_hash': self.reproducibility_hash,
@@ -524,6 +539,21 @@ class ReferenceWorkflow:
         Returns:
             WorkflowResult with all outputs
         """
+        if not mock_fallback_allowed():
+            raise DemonstrationWorkflowError(
+                "ReferenceWorkflow outputs are SIMULATED demonstration data "
+                "(fixed cv_score, fabricated feature importances, random "
+                "prospectivity targets, fixed report page counts) — not real "
+                "pipeline results. To run the demonstration explicitly, set "
+                "MV_ALLOW_MOCK_FALLBACK=true; the result will be tagged "
+                "simulated: true. For real results, use the production "
+                "workflow services instead."
+            )
+        logger.warning(
+            "MV DEGRADED MODE: running reference workflow %s with SIMULATED "
+            "outputs because %s=true — not for production decisions.",
+            self.config.workflow_id, MOCK_FALLBACK_ENV,
+        )
         start_time = datetime.now()
         stage_results = {}
         current_data = {'files': [{'type': i.data_type, 'path': i.file_path} for i in inputs]}
@@ -565,7 +595,8 @@ class ReferenceWorkflow:
             stages=stage_results,
             final_targets=final_targets,
             execution_time=(end_time - start_time).total_seconds(),
-            reproducibility_hash=repro_hash
+            reproducibility_hash=repro_hash,
+            simulated=True
         )
     
     def _generate_reproducibility_hash(self, inputs: List[WorkflowInput], 

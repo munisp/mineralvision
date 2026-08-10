@@ -110,6 +110,8 @@ class TrainingStatus(BaseModel):
     metrics: Optional[Dict[str, float]] = None
     start_time: str
     end_time: Optional[str] = None
+    synthetic: Optional[bool] = None
+    error: Optional[str] = None
 
 class ValidationRequest(BaseModel):
     model_name: str
@@ -189,7 +191,9 @@ async def train_model(
         "model_name": request.model_name,
         "start_time": datetime.now().isoformat(),
         "end_time": None,
-        "metrics": None
+        "metrics": None,
+        "synthetic": None,
+        "error": None
     }
     
     # Store the job
@@ -216,6 +220,10 @@ async def train_model(
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
             torch.save(model.state_dict(), model_path)
             
+            # Propagate the synthetic-data marker (MV_ALLOW_MOCK_FALLBACK path)
+            synthetic = bool(getattr(prediction_service, "last_training_synthetic", False))
+            training_jobs[job_id]["synthetic"] = synthetic
+
             # Evaluate the model to get actual metrics
             try:
                 eval_metrics = prediction_service.evaluate()
@@ -224,7 +232,8 @@ async def train_model(
                     "test_acc": float(eval_metrics.get("test_accuracy", 0.0)),
                     "auc_roc": float(eval_metrics.get("auc_roc", 0.0)),
                     "precision": float(eval_metrics.get("precision", 0.0)),
-                    "recall": float(eval_metrics.get("recall", 0.0))
+                    "recall": float(eval_metrics.get("recall", 0.0)),
+                    "metrics_synthetic": synthetic
                 }
             except Exception as eval_error:
                 training_jobs[job_id]["metrics"] = {
