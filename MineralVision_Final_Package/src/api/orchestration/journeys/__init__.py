@@ -192,7 +192,7 @@ class JourneyRegistry:
                         id="step-001-2",
                         name="Invite Team Members",
                         step_type=StepType.API_CALL,
-                        endpoint="/api/users/invite",
+                        endpoint="/innovations/onboarding/orgs/{org_id}/invitations",
                         method="POST",
                         input_mapping={"project_id": "$.step-001-1.id"},
                         kafka_topic="mineralvision.users.invited",

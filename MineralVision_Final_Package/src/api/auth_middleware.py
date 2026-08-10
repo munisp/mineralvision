@@ -235,6 +235,13 @@ class JWTMiddleware:
         "/redoc",
     }
 
+    # Prefixes for token-bearing public flows (invitation validate/accept,
+    # password reset) — authorized by possession of the secret token itself.
+    PUBLIC_PATH_PREFIXES = (
+        "/innovations/onboarding/invitations/",
+        "/innovations/onboarding/password-reset/",
+    )
+
     def __init__(self, app, enforce: bool = True):
         self.app = app
         self.enforce = enforce
@@ -248,7 +255,8 @@ class JWTMiddleware:
         method = scope.get("method", "GET")
 
         # Always allow CORS preflight and public paths
-        if method == "OPTIONS" or path in self.PUBLIC_PATHS:
+        if method == "OPTIONS" or path in self.PUBLIC_PATHS or \
+                any(path.startswith(p) for p in self.PUBLIC_PATH_PREFIXES):
             await self.app(scope, receive, send)
             return
 

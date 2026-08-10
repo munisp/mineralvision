@@ -31,6 +31,19 @@ router = APIRouter()
 # Initialize RBAC manager
 rbac_manager = create_rbac_manager()
 
+# Roles valid for assignment: the RoleManager catalogue plus the legacy
+# self-registered "user" role. Unknown roles are rejected with 422.
+VALID_ROLES = set(rbac_manager.system.role_manager.roles.keys()) | {"user"}
+
+
+def _validate_roles(roles: list) -> None:
+    unknown = [r for r in roles if r not in VALID_ROLES]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown role(s): {unknown}. Valid roles: {sorted(VALID_ROLES)}"
+        )
+
 
 class UserCreate(BaseModel):
     """Schema for creating a user."""
@@ -120,6 +133,7 @@ async def create_user(
     if db.query(UserModel).filter(UserModel.email == user.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
+    _validate_roles(user.roles)
     role = user.roles[0] if user.roles else "viewer"
     name_parts = user.name.split(" ", 1)
 
@@ -175,6 +189,7 @@ async def update_user(
     if update_data.get("password"):
         db_user.password_hash = hash_password(update_data["password"])
     if update_data.get("roles"):
+        _validate_roles(update_data["roles"])
         db_user.role = update_data["roles"][0]
     if update_data.get("isActive") is not None:
         db_user.is_active = update_data["isActive"]
@@ -214,6 +229,7 @@ async def update_user_roles(
     if not db_user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
 
+    _validate_roles(request.roles)
     if request.roles:
         db_user.role = request.roles[0]
     db_user.updated_at = datetime.utcnow()
