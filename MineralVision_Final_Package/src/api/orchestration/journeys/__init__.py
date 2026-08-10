@@ -38,6 +38,7 @@ class JourneyStep:
     step_type: StepType
     endpoint: Optional[str] = None
     module: Optional[str] = None
+    function: Optional[str] = None  # callable name for module steps (Temporal activity)
     method: str = "POST"
     input_mapping: Dict[str, str] = field(default_factory=dict)
     output_mapping: Dict[str, str] = field(default_factory=dict)
@@ -56,6 +57,7 @@ class JourneyStep:
             "step_type": self.step_type.value,
             "endpoint": self.endpoint,
             "module": self.module,
+            "function": self.function,
             "method": self.method,
             "input_mapping": self.input_mapping,
             "output_mapping": self.output_mapping,
@@ -1177,6 +1179,7 @@ class JourneyRegistry:
                         name="Run Ensemble Detector",
                         step_type=StepType.ML_INFERENCE,
                         module="src.api.waldo.ensemble_detector",
+                        function="run_ensemble_detection",
                         kafka_topic="mineralvision.waldo.detection.completed",
                     ),
                     JourneyStep(

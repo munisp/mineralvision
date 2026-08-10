@@ -857,6 +857,52 @@ class EnsembleWALDODetector:
 
 # Factory functions
 
+def run_ensemble_detection(payload: Optional[Dict[str, Any]] = None,
+                           **kwargs: Any) -> Dict[str, Any]:
+    """Temporal-activity entry point for journey-026 (step-026-2).
+
+    Called as ``run_ensemble_detection(**inputs)`` by the orchestration
+    ``run_ml_inference`` activity — fields may arrive either nested under
+    ``payload`` or spread as top-level kwargs. Accepts:
+        image:  base64 string or nested-list array (H, W, C)
+        fusion_strategy / ensemble_mode / yolo_weight / rfdetr_weight: optional
+        metadata: optional dict attached to detections
+    Returns JSON-serializable detection results + ensemble statistics.
+    """
+    payload = {**(payload or {}), **kwargs}
+    image = payload.get("image")
+    if image is None:
+        raise ValueError("payload must contain 'image' (base64 or nested list)")
+    if isinstance(image, str):
+        import base64
+        raw = base64.b64decode(image)
+        arr = np.frombuffer(raw, dtype=np.uint8)
+        # base64 payloads carry the raw HxWx3 uint8 buffer plus shape
+        shape = payload.get("image_shape")
+        if not shape:
+            raise ValueError("base64 image payloads must include 'image_shape'")
+        image = arr.reshape(shape)
+    image = np.asarray(image)
+    if image.ndim != 3:
+        raise ValueError("image must be an (H, W, C) array")
+
+    detector = create_ensemble_detector(
+        yolo_model=payload.get("yolo_model", "yolo11m.pt"),
+        rfdetr_variant=payload.get("rfdetr_variant", "medium"),
+        fusion_strategy=payload.get("fusion_strategy", "wbf"),
+        ensemble_mode=payload.get("ensemble_mode", "parallel"),
+        yolo_weight=payload.get("yolo_weight", 1.0),
+        rfdetr_weight=payload.get("rfdetr_weight", 1.0),
+        class_names=payload.get("class_names"),
+    )
+    detections = detector.detect(image, metadata=payload.get("metadata"))
+    return {
+        "n_detections": len(detections),
+        "detections": [d.to_dict() for d in detections],
+        "statistics": detector.get_statistics(),
+    }
+
+
 def create_ensemble_detector(
     yolo_model: str = "yolo11m.pt",
     rfdetr_variant: str = "medium",
