@@ -6,9 +6,17 @@ Provides:
 - JEPA-guided prompts for SAM3 segmentation
 - Feature distillation from JEPA to detection/segmentation models
 - Unified inference pipeline combining all models
+
+Decontamination note: this module previously fabricated detection boxes,
+segmentation masks, attention points, and distillation losses with
+``numpy.random``. Those paths are now LOUD: they either call a real
+service (WALDO_SERVICE_URL / SAM3_SERVICE_URL) or raise
+:class:`WaldoIntegrationUnavailable`. No random detections, masks, or
+losses are ever produced.
 """
 
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -21,10 +29,20 @@ from .vjepa_integration import (
     VJEPAFeatureExtractor,
     Embedding,
     FaissIndex,
+    JEPAUnavailableError,
     create_feature_extractor,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class WaldoIntegrationUnavailable(RuntimeError):
+    """Raised when detection/segmentation is requested but no real WALDO
+    detector or SAM3 segmenter (local model or HTTP service) is available.
+
+    Deliberately LOUD: callers must never receive fabricated boxes, masks,
+    or attention points.
+    """
 
 
 class IntegrationMode(Enum):
@@ -179,8 +197,9 @@ class WALDOJEPAIntegration:
         Imports detector primitives from the canonical
         MineralVision_WALDO_Production_Package via the WALDO_PACKAGE_SRC
         env var (or a relative-path fallback). When the heavy ML stack is
-        unavailable, the detector stays None and detection returns no
-        results — never fake detections.
+        unavailable, the detector stays None and detection raises
+        WaldoIntegrationUnavailable (or uses WALDO_SERVICE_URL) — never
+        fake detections.
         """
         if self._waldo_model is not None:
             return
@@ -209,8 +228,9 @@ class WALDOJEPAIntegration:
             logger.info("Canonical WALDO RF-DETR detector loaded")
         except Exception as e:
             logger.warning(
-                f"Canonical WALDO detector unavailable ({e}); "
-                "detection will return no results (no fake detections)"
+                f"Canonical WALDO detector unavailable ({e}); detection will "
+                "use WALDO_SERVICE_URL if set, otherwise raise "
+                "WaldoIntegrationUnavailable (no fake detections)"
             )
             self._waldo_model = None
     
@@ -294,23 +314,91 @@ class WALDOJEPAIntegration:
         
         return refined_detections
     
+    def _run_waldo_detection_service(
+        self,
+        image: Any,
+        confidence_threshold: float
+    ) -> List[DetectionResult]:
+        """Run detection via the real WALDO HTTP service (compose service).
+
+        POSTs the image to ``$WALDO_SERVICE_URL/detect`` and parses real
+        detections from the response. Raises on any failure — never
+        fabricates boxes.
+        """
+        import base64
+        import numpy as np
+
+        service_url = os.environ["WALDO_SERVICE_URL"].rstrip("/")
+
+        try:
+            import httpx
+        except ImportError as e:
+            raise WaldoIntegrationUnavailable(
+                f"httpx is required to call the WALDO service at {service_url}: {e}"
+            )
+
+        arr = np.asarray(image)
+        payload = {
+            "image": base64.b64encode(arr.tobytes()).decode("ascii"),
+            "shape": list(arr.shape),
+            "dtype": str(arr.dtype),
+            "confidence_threshold": confidence_threshold,
+        }
+
+        try:
+            response = httpx.post(f"{service_url}/detect", json=payload, timeout=60.0)
+            response.raise_for_status()
+            body = response.json()
+        except Exception as e:
+            raise WaldoIntegrationUnavailable(
+                f"WALDO service at {service_url}/detect failed: {e}. "
+                "No detections will be fabricated."
+            )
+
+        detections = []
+        for i, det in enumerate(body.get("detections", [])):
+            conf = float(det.get("confidence", 0.0))
+            if conf < confidence_threshold:
+                continue
+            bbox = det["bbox"]
+            detections.append(DetectionResult(
+                detection_id=str(det.get("detection_id") or f"waldo_svc_{i}"),
+                class_name=str(det.get("class_name", "unknown")),
+                confidence=conf,
+                bbox=(float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3])),
+                attributes={"source": "waldo_service", "service_url": service_url},
+            ))
+        return detections
+
     def _run_waldo_detection(
         self,
         image: Any,
         confidence_threshold: float
     ) -> List[DetectionResult]:
         """
-        Run the canonical WALDO detector on an image.
+        Run a real WALDO detector on an image.
 
-        Returns an empty list when the detector is unavailable — never
-        fabricates detections.
+        Order of backends:
+        1. Canonical in-process RF-DETR detector (when loadable).
+        2. WALDO HTTP service when ``WALDO_SERVICE_URL`` is configured.
+        3. Otherwise raise :class:`WaldoIntegrationUnavailable`.
+
+        Fabricated/random detections have been removed; an empty list is
+        only ever returned when a real detector genuinely found nothing.
         """
         import numpy as np
 
-        if self._waldo_model is None:
-            return []
-
-        canonical_detections = self._waldo_model.detect(np.asarray(image))
+        if self._waldo_model is not None:
+            canonical_detections = self._waldo_model.detect(np.asarray(image))
+        elif os.environ.get("WALDO_SERVICE_URL"):
+            return self._run_waldo_detection_service(image, confidence_threshold)
+        else:
+            raise WaldoIntegrationUnavailable(
+                "No WALDO detector available: canonical RF-DETR could not be "
+                "loaded and WALDO_SERVICE_URL is not set. Detection is "
+                "unavailable — no fake boxes will be produced. Configure the "
+                "waldo compose service or provide a loadable checkpoint."
+            )
 
         detections = []
         for det in canonical_detections:
@@ -377,21 +465,36 @@ class SAM3JEPAIntegration:
         logger.info(f"Initialized SAM3JEPAIntegration with mode={integration_mode.value}")
     
     def load_sam3_model(self) -> None:
-        """Load SAM3 segmentation model."""
-        if self.sam3_model_path:
-            logger.info(f"Loading SAM3 model from {self.sam3_model_path}")
-            self._sam3_model = {
-                "type": "sam3",
-                "path": self.sam3_model_path,
-                "loaded": True,
-            }
-        else:
-            logger.info("Using default SAM3 model configuration")
-            self._sam3_model = {
-                "type": "sam3",
-                "path": None,
-                "loaded": True,
-            }
+        """Attempt to load a real SAM-family segmentation model.
+
+        Tries the ultralytics SAM backend when a checkpoint is provided.
+        When no real model can be loaded, ``self._sam3_model`` stays None
+        and segmentation either uses SAM3_SERVICE_URL or raises
+        :class:`WaldoIntegrationUnavailable` — the old behavior of
+        pretending a model was loaded (a bare dict) has been removed.
+        """
+        if self._sam3_model is not None:
+            return
+
+        if not self.sam3_model_path:
+            logger.warning(
+                "No SAM3 checkpoint configured; segmentation will use "
+                "SAM3_SERVICE_URL if set, otherwise raise "
+                "WaldoIntegrationUnavailable"
+            )
+            return
+
+        try:
+            from ultralytics import SAM
+            self._sam3_model = SAM(self.sam3_model_path)
+            logger.info(f"Loaded real SAM model from {self.sam3_model_path}")
+        except Exception as e:
+            logger.warning(
+                f"Could not load real SAM model from {self.sam3_model_path} "
+                f"({e}); segmentation will use SAM3_SERVICE_URL if set, "
+                "otherwise raise WaldoIntegrationUnavailable"
+            )
+            self._sam3_model = None
     
     def register_target_examples(
         self,
@@ -426,10 +529,48 @@ class SAM3JEPAIntegration:
         logger.info(f"Registered {len(example_images)} examples for {target_type.value}")
     
     def _extract_boundary_features(self, mask: Any) -> Optional[List[float]]:
-        """Extract features from mask boundaries."""
+        """Extract real geometric features from mask boundaries.
+
+        Computes a deterministic 8-dim descriptor (area, perimeter,
+        centroid, bbox extents, fill ratio) from the mask via a numpy
+        morphological gradient. The previous implementation returned
+        ``np.random.randn(256)`` and has been removed.
+        """
         import numpy as np
-        
-        return np.random.randn(256).tolist()
+
+        m = np.asarray(mask)
+        if m.size == 0 or m.ndim != 2:
+            return None
+
+        binary = (m > 0).astype(np.float32)
+        area = float(binary.sum())
+        if area == 0.0:
+            return None
+
+        # Morphological gradient: boundary = mask - eroded(mask).
+        eroded = np.minimum.reduce([
+            binary,
+            np.roll(binary, 1, axis=0),
+            np.roll(binary, -1, axis=0),
+            np.roll(binary, 1, axis=1),
+            np.roll(binary, -1, axis=1),
+        ])
+        boundary = binary - eroded
+        perimeter = float(boundary.sum())
+
+        ys, xs = np.nonzero(binary)
+        h, w = binary.shape
+        features = [
+            area / (h * w),
+            perimeter / (2.0 * (h + w)),
+            float(xs.mean()) / w,
+            float(ys.mean()) / h,
+            float(xs.max() - xs.min() + 1) / w,
+            float(ys.max() - ys.min() + 1) / h,
+            area / (perimeter + 1e-8),
+            perimeter / (area + 1e-8),
+        ]
+        return features
     
     def generate_prompts(
         self,
@@ -503,42 +644,38 @@ class SAM3JEPAIntegration:
         image_size: Tuple[int, int],
         num_points: int = 3
     ) -> List[Tuple[int, int]]:
-        """Generate attention points based on embedding similarity."""
-        import numpy as np
-        
-        h, w = image_size
-        points = []
-        
-        for _ in range(num_points):
-            x = np.random.randint(w // 4, 3 * w // 4)
-            y = np.random.randint(h // 4, 3 * h // 4)
-            points.append((x, y))
-        
-        return points
-    
+        """Generate attention points based on embedding similarity.
+
+        A global (pooled) embedding carries no spatial information, so
+        there is no honest way to localize attention points from it. The
+        previous implementation returned random pixel coordinates and has
+        been removed. Raises until a real spatial attention/saliency map
+        (e.g. from token-level torch_core embeddings) is wired in.
+        """
+        raise WaldoIntegrationUnavailable(
+            "JEPA-guided attention point generation requires a real spatial "
+            "attention map (token-level embeddings), which is not available "
+            "from a pooled embedding. Random attention points have been "
+            "removed — no fabricated prompts will be produced."
+        )
+
     def _generate_attention_bbox(
         self,
         image_emb: List[float],
         target_emb: List[float],
         image_size: Tuple[int, int]
     ) -> Optional[Tuple[int, int, int, int]]:
-        """Generate attention bounding box based on embedding similarity."""
-        import numpy as np
-        
-        h, w = image_size
-        
-        cx = w // 2 + np.random.randint(-w // 4, w // 4)
-        cy = h // 2 + np.random.randint(-h // 4, h // 4)
-        
-        bw = np.random.randint(w // 4, w // 2)
-        bh = np.random.randint(h // 4, h // 2)
-        
-        x1 = max(0, cx - bw // 2)
-        y1 = max(0, cy - bh // 2)
-        x2 = min(w, cx + bw // 2)
-        y2 = min(h, cy + bh // 2)
-        
-        return (x1, y1, x2, y2)
+        """Generate attention bounding box based on embedding similarity.
+
+        See _generate_attention_points: pooled embeddings cannot localize,
+        and the previous random-box implementation has been removed.
+        """
+        raise WaldoIntegrationUnavailable(
+            "JEPA-guided attention bbox generation requires a real spatial "
+            "attention map (token-level embeddings), which is not available "
+            "from a pooled embedding. Random bounding boxes have been "
+            "removed — no fabricated prompts will be produced."
+        )
     
     def segment(
         self,
@@ -586,35 +723,97 @@ class SAM3JEPAIntegration:
         
         return results
     
+    def _run_sam3_segmentation_service(
+        self,
+        image: Any,
+        prompt: JEPAPrompt
+    ) -> Any:
+        """Run segmentation via the real SAM3 HTTP service.
+
+        POSTs the image and prompt to ``$SAM3_SERVICE_URL/segment`` and
+        decodes the returned mask. Raises on any failure — never
+        fabricates masks.
+        """
+        import base64
+        import numpy as np
+
+        service_url = os.environ["SAM3_SERVICE_URL"].rstrip("/")
+
+        try:
+            import httpx
+        except ImportError as e:
+            raise WaldoIntegrationUnavailable(
+                f"httpx is required to call the SAM3 service at {service_url}: {e}"
+            )
+
+        arr = np.asarray(image)
+        payload = {
+            "image": base64.b64encode(arr.tobytes()).decode("ascii"),
+            "shape": list(arr.shape),
+            "dtype": str(arr.dtype),
+            "prompt": prompt.to_dict(),
+        }
+
+        try:
+            response = httpx.post(f"{service_url}/segment", json=payload, timeout=60.0)
+            response.raise_for_status()
+            body = response.json()
+        except Exception as e:
+            raise WaldoIntegrationUnavailable(
+                f"SAM3 service at {service_url}/segment failed: {e}. "
+                "No segmentation mask will be fabricated."
+            )
+
+        mask_b64 = body.get("mask")
+        mask_shape = body.get("mask_shape")
+        if not mask_b64 or not mask_shape:
+            raise WaldoIntegrationUnavailable(
+                f"SAM3 service at {service_url}/segment returned no mask. "
+                "No segmentation mask will be fabricated."
+            )
+
+        mask = np.frombuffer(base64.b64decode(mask_b64), dtype=np.uint8).reshape(mask_shape)
+        return mask
+
     def _run_sam3_segmentation(
         self,
         image: Any,
         prompt: JEPAPrompt
     ) -> Optional[Any]:
-        """Run SAM3 segmentation with a prompt."""
+        """Run real segmentation with a prompt.
+
+        Order of backends:
+        1. A real loaded SAM model (ultralytics), when available.
+        2. SAM3 HTTP service when ``SAM3_SERVICE_URL`` is configured.
+        3. Otherwise raise :class:`WaldoIntegrationUnavailable`.
+
+        The previous implementation drew circles of random radius around
+        prompt points and called them masks; that has been removed.
+        """
         import numpy as np
-        
-        if isinstance(image, np.ndarray):
-            h, w = image.shape[:2]
-        else:
-            h, w = 224, 224
-        
-        mask = np.zeros((h, w), dtype=np.uint8)
-        
-        if prompt.prompt_type == "point" and prompt.coordinates:
-            for x, y in prompt.coordinates:
-                cv_x, cv_y = int(x), int(y)
-                radius = np.random.randint(20, 50)
-                
-                y_coords, x_coords = np.ogrid[:h, :w]
-                dist = np.sqrt((x_coords - cv_x) ** 2 + (y_coords - cv_y) ** 2)
-                mask[dist <= radius] = 1
-                
-        elif prompt.prompt_type == "bbox" and prompt.bbox:
-            x1, y1, x2, y2 = prompt.bbox
-            mask[int(y1):int(y2), int(x1):int(x2)] = 1
-        
-        return mask
+
+        if self._sam3_model is not None:
+            predict_kwargs: Dict[str, Any] = {}
+            if prompt.prompt_type == "point" and prompt.coordinates:
+                predict_kwargs["points"] = [list(p) for p in prompt.coordinates]
+                predict_kwargs["labels"] = [1] * len(prompt.coordinates)
+            elif prompt.prompt_type == "bbox" and prompt.bbox:
+                predict_kwargs["bboxes"] = [list(prompt.bbox)]
+            result = self._sam3_model.predict(np.asarray(image), **predict_kwargs)
+            masks = getattr(result[0], "masks", None)
+            if masks is None or masks.data is None or len(masks.data) == 0:
+                return None
+            mask = masks.data[0].cpu().numpy().astype(np.uint8)
+            return mask
+
+        if os.environ.get("SAM3_SERVICE_URL"):
+            return self._run_sam3_segmentation_service(image, prompt)
+
+        raise WaldoIntegrationUnavailable(
+            "No SAM3 segmenter available: no real SAM model could be loaded "
+            "and SAM3_SERVICE_URL is not set. Segmentation is unavailable — "
+            "no fabricated masks will be produced."
+        )
     
     def _cosine_similarity(self, vec1: List[float], vec2: List[float]) -> float:
         """Compute cosine similarity between two vectors."""
@@ -839,6 +1038,36 @@ class FeatureDistillation:
         exp_x = np.exp(x - np.max(x, axis=-1, keepdims=True))
         return exp_x / np.sum(exp_x, axis=-1, keepdims=True)
     
+    def _extract_student_features(self, batch: List[Any]) -> Any:
+        """Extract features from the real student model.
+
+        The student must expose ``extract_features(images)`` or be directly
+        callable on a batch of images. Raises honestly otherwise — the
+        previous implementation used ``np.random.randn`` as student
+        features, which made the distillation loss meaningless.
+        """
+        import numpy as np
+
+        if self.student is None:
+            raise JEPAUnavailableError(
+                "Feature distillation requires a real student model; "
+                "student_model is None. No random student features will be used."
+            )
+
+        if hasattr(self.student, "extract_features"):
+            features = self.student.extract_features(batch)
+        elif callable(self.student):
+            features = self.student(batch)
+        else:
+            raise JEPAUnavailableError(
+                "Feature distillation requires a student model that is "
+                "callable or exposes extract_features(images); got "
+                f"{type(self.student).__name__}. No random student features "
+                "will be used."
+            )
+
+        return np.asarray(features, dtype=np.float32)
+
     def distill_to_detector(
         self,
         detector_backbone: Any,
@@ -846,9 +1075,13 @@ class FeatureDistillation:
         num_epochs: int = 10,
         learning_rate: float = 1e-4
     ) -> Dict[str, Any]:
-        """Distill JEPA features to a detection backbone."""
-        import numpy as np
-        
+        """Distill JEPA features to a detection backbone.
+
+        Student features come from the real student model
+        (``self.student``); teacher features from the real torch_core-backed
+        extractor. Raises :class:`JEPAUnavailableError` if either is
+        unavailable — no fabricated losses.
+        """
         training_stats = []
         
         for epoch in range(num_epochs):
@@ -857,7 +1090,7 @@ class FeatureDistillation:
             for i in range(0, len(training_images), 32):
                 batch = training_images[i:i + 32]
                 
-                student_features = np.random.randn(len(batch), self.teacher.config.embedding_dim)
+                student_features = self._extract_student_features(batch)
                 
                 losses = self.compute_distillation_loss(batch, student_features)
                 epoch_loss += losses["total_loss"]
