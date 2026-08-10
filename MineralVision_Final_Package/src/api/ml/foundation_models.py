@@ -69,7 +69,11 @@ class ModalityConfig:
     embedding_dim: int
     normalization: str  # 'standard', 'minmax', 'robust'
     augmentations: List[str]
-    
+    # Honesty disclosures: current encoders are fixed-seed random projections,
+    # NOT learned encoders (see RandomProjectionAdapter)
+    encoder_type: str = "random_projection"
+    not_learned: bool = True
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             'modality': self.modality.value,
@@ -77,7 +81,9 @@ class ModalityConfig:
             'patch_size': self.patch_size,
             'embedding_dim': self.embedding_dim,
             'normalization': self.normalization,
-            'augmentations': self.augmentations
+            'augmentations': self.augmentations,
+            'encoder_type': self.encoder_type,
+            'not_learned': self.not_learned
         }
 
 
@@ -181,60 +187,67 @@ class ModalityAdapter(ABC):
         pass
 
 
-class MultispectralAdapter(ModalityAdapter):
-    """Adapter for multispectral imagery."""
+class RandomProjectionAdapter(ModalityAdapter):
+    """
+    Fixed-seed random-projection encoder adapter.
+
+    HONEST DISCLOSURE: this is NOT a learned encoder. It projects patches
+    through a deterministic (seeded) random matrix. Embeddings are stable
+    across runs but carry no learned representation. Exposed via
+    ``encoder_type = "random_projection"`` and ``not_learned = True`` in
+    encoder metadata / ModalityConfig payloads.
+    """
+
+    encoder_type = "random_projection"
+    not_learned = True
+    _projection_seed = 42
+
+    def _channels(self, data) -> int:
+        """Number of input channels per patch (subclass hook)."""
+        raise NotImplementedError
+
+    def _projection(self, patch_dim: int) -> np.ndarray:
+        np.random.seed(self._projection_seed)
+        return np.random.randn(patch_dim, self.embedding_dim) / np.sqrt(patch_dim)
+
+    def encode(self, data: np.ndarray) -> np.ndarray:
+        """Encode patches to embeddings via seeded random projection."""
+        batch_size = data.shape[0]
+        patch_dim = self._channels(data) * self.patch_size * self.patch_size
+        projection = self._projection(patch_dim)
+        patches = data.reshape(batch_size, -1, patch_dim)
+        return patches @ projection
+
+    def decode(self, embeddings: np.ndarray) -> np.ndarray:
+        """Decode via pseudo-inverse of the same seeded projection."""
+        patch_dim = self._channels(None) * self.patch_size * self.patch_size
+        projection = self._projection(patch_dim)
+        # pinv of (patch_dim, emb) is (emb, patch_dim): embeddings @ pinv -> patches
+        projection_inv = np.linalg.pinv(projection)
+        return embeddings @ projection_inv
+
+    def encoder_metadata(self) -> Dict[str, Any]:
+        """API-facing honesty metadata for this encoder."""
+        return {
+            "encoder_type": self.encoder_type,
+            "not_learned": self.not_learned,
+            "seed": self._projection_seed,
+        }
+
+
+class MultispectralAdapter(RandomProjectionAdapter):
+    """Adapter for multispectral imagery.
+
+    Back-compat name; implementation is a RandomProjectionAdapter."""
     
     def __init__(self, n_bands: int = 4, patch_size: int = 16, embedding_dim: int = 768):
         self.n_bands = n_bands
         self.patch_size = patch_size
         self.embedding_dim = embedding_dim
         
-    def encode(self, data: np.ndarray) -> np.ndarray:
-        """
-        Encode multispectral patches to embeddings.
-        
-        Args:
-            data: (batch, bands, height, width)
-            
-        Returns:
-            Embeddings (batch, n_patches, embedding_dim)
-        """
-        batch_size = data.shape[0]
-        h, w = data.shape[2], data.shape[3]
-        
-        # Calculate number of patches
-        n_patches_h = h // self.patch_size
-        n_patches_w = w // self.patch_size
-        n_patches = n_patches_h * n_patches_w
-        
-        # Flatten patches (simplified - in production use conv projection)
-        patch_dim = self.n_bands * self.patch_size * self.patch_size
-        
-        # Random projection to embedding dim (placeholder for learned projection)
-        np.random.seed(42)
-        projection = np.random.randn(patch_dim, self.embedding_dim) / np.sqrt(patch_dim)
-        
-        # Reshape and project
-        patches = data.reshape(batch_size, -1, patch_dim)
-        embeddings = patches @ projection
-        
-        return embeddings
-    
-    def decode(self, embeddings: np.ndarray) -> np.ndarray:
-        """Decode embeddings back to patches."""
-        # Simplified inverse projection
-        batch_size, n_patches, _ = embeddings.shape
-        patch_dim = self.n_bands * self.patch_size * self.patch_size
-        
-        np.random.seed(42)
-        projection = np.random.randn(patch_dim, self.embedding_dim) / np.sqrt(patch_dim)
-        
-        # Pseudo-inverse
-        projection_inv = np.linalg.pinv(projection)
-        patches = embeddings @ projection_inv.T
-        
-        return patches
-    
+    def _channels(self, data) -> int:
+        return self.n_bands
+
     def get_config(self) -> ModalityConfig:
         return ModalityConfig(
             modality=DataModality.MULTISPECTRAL,
@@ -246,7 +259,7 @@ class MultispectralAdapter(ModalityAdapter):
         )
 
 
-class GeophysicsAdapter(ModalityAdapter):
+class GeophysicsAdapter(RandomProjectionAdapter):
     """Adapter for geophysical grids (magnetics, radiometrics, gravity)."""
     
     def __init__(self, modality: DataModality, patch_size: int = 32, embedding_dim: int = 768):
@@ -254,43 +267,11 @@ class GeophysicsAdapter(ModalityAdapter):
         self.patch_size = patch_size
         self.embedding_dim = embedding_dim
         
-    def encode(self, data: np.ndarray) -> np.ndarray:
-        """
-        Encode geophysical grid patches to embeddings.
-        
-        Args:
-            data: (batch, channels, height, width)
-            
-        Returns:
-            Embeddings (batch, n_patches, embedding_dim)
-        """
-        batch_size = data.shape[0]
-        n_channels = data.shape[1]
-        
-        # Flatten patches
-        patch_dim = n_channels * self.patch_size * self.patch_size
-        
-        np.random.seed(43)
-        projection = np.random.randn(patch_dim, self.embedding_dim) / np.sqrt(patch_dim)
-        
-        patches = data.reshape(batch_size, -1, patch_dim)
-        embeddings = patches @ projection
-        
-        return embeddings
-    
-    def decode(self, embeddings: np.ndarray) -> np.ndarray:
-        """Decode embeddings back to patches."""
-        batch_size, n_patches, _ = embeddings.shape
-        n_channels = 1  # Single channel for geophysics
-        patch_dim = n_channels * self.patch_size * self.patch_size
-        
-        np.random.seed(43)
-        projection = np.random.randn(patch_dim, self.embedding_dim) / np.sqrt(patch_dim)
-        projection_inv = np.linalg.pinv(projection)
-        
-        patches = embeddings @ projection_inv.T
-        return patches
-    
+    _projection_seed = 43
+
+    def _channels(self, data) -> int:
+        return 1  # Single channel for geophysics
+
     def get_config(self) -> ModalityConfig:
         return ModalityConfig(
             modality=self.modality,
