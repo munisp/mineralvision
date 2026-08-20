@@ -42,7 +42,8 @@ Thumbs.db
 .vscode/
 *.swp
 
-# ML artifacts
+# ML artifacts (deployment-managed and never committed accidentally)
+models/
 *.pt
 *.pth
 *.onnx

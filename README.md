@@ -77,6 +77,12 @@ mineralvision/
 └── docs/                            # Documentation (start with VISION.md)
 ```
 
+## Oil-Spill Intelligence Extension
+
+MineralVision now supports **reviewable oil-spill assessment** from drone, satellite, fluorosensor, or manual-annotation evidence. The extension converts a versioned segmentation mask into a cleaned oil footprint, area estimate, severity screen, GeoJSON geometry (when a geographic image footprint is supplied), persistent incident record, human review state, and advisory drone-coverage grid. Raw-image inference is disabled by default and requires an explicitly configured, trusted local TorchScript or ONNX model.
+
+Read the [research review](docs/oil-spill/research-review.md) and [architecture and operating constraints](docs/oil-spill/architecture.md). The API surface is available under `/api/oil-spill`.
+
 ## Development
 
 ```bash

@@ -140,6 +140,35 @@ class ReportModel(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class OilSpillIncidentModel(Base):
+    """Persistent, reviewable assessment of a potential marine oil spill."""
+    __tablename__ = "oil_spill_incidents"
+
+    id = Column(String(36), primary_key=True)
+    project_id = Column(String(36), ForeignKey("projects.id"), index=True)
+    image_id = Column(String(255), index=True)
+    source = Column(String(50), nullable=False, index=True)
+    model_id = Column(String(128), nullable=False)
+    model_version = Column(String(128), nullable=False)
+    review_status = Column(String(50), nullable=False, default="pending_review", index=True)
+    severity = Column(String(50), nullable=False, default="unknown", index=True)
+    oil_pixel_count = Column(Integer, nullable=False, default=0)
+    oil_fraction = Column(Float, nullable=False, default=0.0)
+    oil_area_m2 = Column(Float)
+    confidence = Column(Float)
+    quality_flags = Column(JSON, default=list)
+    geometry_geojson = Column(JSON)
+    image_width_px = Column(Integer, nullable=False)
+    image_height_px = Column(Integer, nullable=False)
+    observed_at = Column(DateTime)
+    source_metadata = Column(JSON, default=dict)
+    reviewer = Column(String(255))
+    review_note = Column(Text)
+    reviewed_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
 class AuditLogModel(Base):
     __tablename__ = "audit_logs"
     

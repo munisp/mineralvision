@@ -60,6 +60,7 @@ from .endpoints.climate_resilience import router as climate_resilience_router
 from .endpoints.digital_twin import router as digital_twin_router
 from .endpoints.autonomous_exploration import router as autonomous_exploration_router
 from .endpoints.indigenous_knowledge import router as indigenous_knowledge_router
+from .endpoints.oil_spill import router as oil_spill_router
 
 # Orchestration router
 from .endpoints.journeys import router as journeys_router
@@ -205,7 +206,8 @@ async def api_status():
             "reports": "active",
             "users": "active",
             "journeys": "active",
-            "waldo": "active"
+            "waldo": "active",
+            "oil_spill_intelligence": "active"
         }
     }
 
@@ -249,8 +251,9 @@ app.include_router(indigenous_knowledge_router, prefix="/api", tags=["indigenous
 # Orchestration/Journeys router (already has /api/journeys prefix)
 app.include_router(journeys_router, tags=["journeys"])
 
-# WALDO proxy router
+# Computer-vision and environmental-response assessment routers
 app.include_router(waldo_router)
+app.include_router(oil_spill_router)
 
 # ---------------------------------------------------------------------------
 # Innovation routers (20 premiere features, each with its own /innovations/<name> prefix)
