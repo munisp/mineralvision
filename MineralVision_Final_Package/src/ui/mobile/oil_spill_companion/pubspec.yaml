@@ -1,0 +1,17 @@
+name: mineralvision_oil_spill_companion
+description: Secure mobile companion for MineralVision oil-spill review and field evidence capture.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_secure_storage: ^9.2.2
+  http: ^1.2.2
+  image_picker: ^1.1.2
+
+flutter:
+  uses-material-design: true

@@ -133,3 +133,148 @@ class SearchPlanResponse(BaseModel):
     recommended_search_area_m2: Optional[float]
     priority_cells: List[Dict[str, Any]]
     notes: List[str]
+
+
+class ModelLifecycleStatus(str, Enum):
+    """Governance state for a registered segmentation model."""
+
+    CANDIDATE = "candidate"
+    APPROVED = "approved"
+    RETIRED = "retired"
+
+
+class EvaluationSplit(str, Enum):
+    """Dataset partition category recorded with an evaluation run."""
+
+    DEVELOPMENT = "development"
+    VALIDATION = "validation"
+    SEALED_HOLDOUT = "sealed_holdout"
+
+
+class IncidentEventType(str, Enum):
+    """Reviewable operational events associated with an incident."""
+
+    EVIDENCE_ATTACHED = "evidence_attached"
+    RESURVEY_REQUESTED = "resurvey_requested"
+    COVERAGE_PLAN_CREATED = "coverage_plan_created"
+    REVIEW_COMPLETED = "review_completed"
+    EXPORTED = "exported"
+    DOMAIN_SHIFT_FLAGGED = "domain_shift_flagged"
+
+
+class SegmentationMetrics(BaseModel):
+    """Oil-class metrics calculated on a documented evaluation dataset."""
+
+    oil_f1: float = Field(..., ge=0.0, le=1.0)
+    oil_iou: float = Field(..., ge=0.0, le=1.0)
+    oil_precision: float = Field(..., ge=0.0, le=1.0)
+    oil_recall: float = Field(..., ge=0.0, le=1.0)
+    expected_calibration_error: Optional[float] = Field(None, ge=0.0, le=1.0)
+
+
+class ModelRegistrationRequest(BaseModel):
+    """A versioned local segmentation artifact eligible for controlled evaluation."""
+
+    model_id: str = Field(..., min_length=1, max_length=128)
+    model_version: str = Field(..., min_length=1, max_length=128)
+    engine: str = Field(..., pattern="^(torchscript|onnx)$")
+    artifact_sha256: str = Field(..., pattern="^[a-fA-F0-9]{64}$")
+    intended_domains: List[str] = Field(..., min_length=1, max_length=20)
+    model_card_url: Optional[str] = Field(None, max_length=2048)
+    notes: Optional[str] = Field(None, max_length=5000)
+
+
+class ModelRegistrationResponse(BaseModel):
+    id: str
+    model_id: str
+    model_version: str
+    engine: str
+    artifact_sha256: str
+    intended_domains: List[str]
+    lifecycle_status: ModelLifecycleStatus
+    created_at: datetime
+
+
+class EvaluationRunRequest(BaseModel):
+    """Evaluation evidence required before model promotion."""
+
+    dataset_fingerprint: str = Field(..., min_length=8, max_length=128)
+    split: EvaluationSplit
+    domain: str = Field(..., min_length=1, max_length=255)
+    sample_count: int = Field(..., ge=1, le=10_000_000)
+    metrics: SegmentationMetrics
+    jepa_backbone: Optional[str] = Field(None, max_length=128)
+    reviewer: str = Field(..., min_length=1, max_length=255)
+    notes: Optional[str] = Field(None, max_length=5000)
+
+
+class EvaluationRunResponse(BaseModel):
+    id: str
+    model_id: str
+    model_version: str
+    dataset_fingerprint: str
+    split: EvaluationSplit
+    domain: str
+    sample_count: int
+    metrics: SegmentationMetrics
+    jepa_backbone: Optional[str]
+    created_at: datetime
+
+
+class ModelApprovalRequest(BaseModel):
+    """Human approval of a model after its sealed-holdout evidence clears the gate."""
+
+    reviewer: str = Field(..., min_length=1, max_length=255)
+    note: Optional[str] = Field(None, max_length=5000)
+
+
+class ModelPromotionResponse(BaseModel):
+    model_id: str
+    model_version: str
+    eligible: bool
+    lifecycle_status: ModelLifecycleStatus
+    reasons: List[str]
+
+
+class IncidentEventRequest(BaseModel):
+    event_type: IncidentEventType
+    actor: str = Field(..., min_length=1, max_length=255)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class IncidentEventResponse(BaseModel):
+    id: str
+    incident_id: str
+    event_type: IncidentEventType
+    actor: str
+    details: Dict[str, Any]
+    created_at: datetime
+
+
+class OperationsSummaryResponse(BaseModel):
+    total_incidents: int
+    pending_review: int
+    confirmed: int
+    needs_resurvey: int
+    high_or_critical: int
+    approved_models: int
+    candidate_models: int
+
+
+class TemporalConsensusRequest(BaseModel):
+    """Aligned model probability masks, optionally paired with real JEPA embeddings."""
+
+    masks_base64: List[str] = Field(..., min_length=2, max_length=64)
+    image_width_px: int = Field(..., ge=1, le=20_000)
+    image_height_px: int = Field(..., ge=1, le=20_000)
+    jepa_embeddings: Optional[List[List[float]]] = None
+
+
+class TemporalConsensusResponse(BaseModel):
+    """Fused probability evidence and explicit temporal-quality diagnostics."""
+
+    fused_mask_base64: str
+    frame_weights: List[float]
+    temporal_stability: float
+    used_jepa_embeddings: bool
+    quality_flags: List[str]

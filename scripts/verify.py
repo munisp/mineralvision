@@ -291,11 +291,10 @@ def check_prb_006_database_persistence() -> Tuple[bool, str]:
     """PRB-006: Database persistence verified (no in-memory defaults)."""
     py_files = find_files(PRODUCTION_PATHS, [".py"])
     
-    # Patterns indicating problematic in-memory storage as primary data store
-    # Note: _cache variables are legitimate runtime caches, not flagged
+    # Patterns indicating problematic in-memory storage as primary data store.
+    # Note: _cache variables are legitimate runtime caches, not flagged.
     inmemory_patterns = [
         r"#\s*In-memory storage",  # Explicit comment indicating in-memory as primary
-        r"sqlite.*:memory:",  # SQLite in-memory database
     ]
     
     violations = []

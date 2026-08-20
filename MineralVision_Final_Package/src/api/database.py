@@ -10,29 +10,32 @@ from datetime import datetime
 from typing import Optional, List
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Text, JSON, ForeignKey, Boolean
+from sqlalchemy import create_engine, Column, String, Float, Integer, DateTime, Text, JSON, ForeignKey, Boolean, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship, Session
 
 # Database configuration
 # Production: set DATABASE_URL to a Postgres DSN, e.g.
 #   postgresql+psycopg2://user:pass@host:5432/mineralvision
-# SQLite is only a development fallback when DATABASE_URL is unset.
+# PostgreSQL is mandatory in every environment; Alembic owns schema creation.
 logger = logging.getLogger(__name__)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
-    DATABASE_URL = "sqlite:///./mineralvision.db"
-    logger.warning(
-        "DATABASE_URL is not set — falling back to local SQLite "
-        "(mineralvision.db). This is a DEVELOPMENT fallback only; configure a "
-        "Postgres DSN via DATABASE_URL for production."
+    raise RuntimeError(
+        "DATABASE_URL is required and must point to PostgreSQL. "
+        "Example: postgresql://mineralvision:password@localhost:5432/mineralvision"
     )
+if not DATABASE_URL.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")):
+    raise RuntimeError("DATABASE_URL must use a PostgreSQL connection URL; SQLite is not supported")
 
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
-    echo=False
+    pool_pre_ping=True,
+    pool_size=int(os.getenv("DATABASE_POOL_SIZE", "10")),
+    max_overflow=int(os.getenv("DATABASE_MAX_OVERFLOW", "20")),
+    echo=False,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -156,17 +159,66 @@ class OilSpillIncidentModel(Base):
     oil_fraction = Column(Float, nullable=False, default=0.0)
     oil_area_m2 = Column(Float)
     confidence = Column(Float)
-    quality_flags = Column(JSON, default=list)
-    geometry_geojson = Column(JSON)
+    quality_flags = Column(JSONB, default=list)
+    geometry_geojson = Column(JSONB)
     image_width_px = Column(Integer, nullable=False)
     image_height_px = Column(Integer, nullable=False)
     observed_at = Column(DateTime)
-    source_metadata = Column(JSON, default=dict)
+    source_metadata = Column(JSONB, default=dict)
     reviewer = Column(String(255))
     review_note = Column(Text)
     reviewed_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class OilSpillModelModel(Base):
+    """Registered, versioned segmentation artifact subject to promotion governance."""
+    __tablename__ = "oil_spill_models"
+    __table_args__ = (UniqueConstraint("model_id", "model_version", name="uq_oil_spill_model_version"),)
+
+    id = Column(String(36), primary_key=True)
+    model_id = Column(String(128), nullable=False, index=True)
+    model_version = Column(String(128), nullable=False)
+    engine = Column(String(32), nullable=False)
+    artifact_sha256 = Column(String(64), nullable=False, unique=True)
+    intended_domains = Column(JSONB, nullable=False, default=list)
+    model_card_url = Column(String(2048))
+    notes = Column(Text)
+    lifecycle_status = Column(String(32), nullable=False, default="candidate", index=True)
+    approved_by = Column(String(255))
+    approved_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class OilSpillEvaluationRunModel(Base):
+    """Reproducible metric record for a model evaluated on a declared dataset split."""
+    __tablename__ = "oil_spill_evaluation_runs"
+
+    id = Column(String(36), primary_key=True)
+    model_registration_id = Column(String(36), ForeignKey("oil_spill_models.id"), nullable=False, index=True)
+    dataset_fingerprint = Column(String(128), nullable=False, index=True)
+    split = Column(String(32), nullable=False, index=True)
+    domain = Column(String(255), nullable=False, index=True)
+    sample_count = Column(Integer, nullable=False)
+    metrics = Column(JSONB, nullable=False)
+    jepa_backbone = Column(String(128))
+    reviewer = Column(String(255), nullable=False)
+    notes = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OilSpillIncidentEventModel(Base):
+    """Immutable timeline event associated with a persistent oil-spill assessment."""
+    __tablename__ = "oil_spill_incident_events"
+
+    id = Column(String(36), primary_key=True)
+    incident_id = Column(String(36), ForeignKey("oil_spill_incidents.id"), nullable=False, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    actor = Column(String(255), nullable=False)
+    details = Column(JSONB, nullable=False, default=dict)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class AuditLogModel(Base):
@@ -184,8 +236,9 @@ class AuditLogModel(Base):
 
 # Database initialization
 def init_db():
-    """Create all tables in the database."""
-    Base.metadata.create_all(bind=engine)
+    """Verify PostgreSQL connectivity; schema creation is handled by Alembic migrations."""
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
 
 
 def get_db():

@@ -25,6 +25,7 @@ import UsersPage from './pages/admin/UsersPage';
 import JourneysPage from './pages/journeys/JourneysPage';
 import MapExplorerPage from './pages/geology/MapExplorerPage';
 import MineralMonitoringPage from './pages/mineral-monitoring/MineralMonitoringPage';
+import OilSpillOperationsPage from './pages/oil-spill/OilSpillOperationsPage';
 import { Toaster } from './components/ui/toaster';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -66,6 +67,7 @@ function App() {
           <Route path="visualization" element={<Visualization3DPage />} />
           <Route path="inversion" element={<InversionPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="oil-spill" element={<OilSpillOperationsPage />} />
                                         <Route path="sensor-fusion" element={<SensorFusionPage />} />
                                         <Route path="gnss" element={<GNSSPage />} />
                                                                                 <Route path="ai-insights" element={<AIInsightsPage />} />

@@ -38,6 +38,20 @@
       "description": "Manage exploration projects",
       "url": "/projects",
       "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Oil Spill Operations",
+      "short_name": "Oil Spill",
+      "description": "Triage and review oil-spill evidence",
+      "url": "/oil-spill",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Capture Field Evidence",
+      "short_name": "Capture",
+      "description": "Open the oil-spill field evidence workflow",
+      "url": "/oil-spill?capture=1",
+      "icons": [{ "src": "/pwa-192x192.png", "sizes": "192x192" }]
     }
   ]
 }

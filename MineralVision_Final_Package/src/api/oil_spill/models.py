@@ -7,6 +7,7 @@ always use the mask-assessment pathway with independently produced evidence.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import os
 from abc import ABC, abstractmethod
@@ -34,6 +35,7 @@ class ModelDescriptor:
     version: str
     engine: str
     path: Path
+    artifact_sha256: str
     input_size: int = 512
     oil_class_index: int = 1
 
@@ -181,6 +183,7 @@ def model_from_environment() -> OilSpillSegmentationModel:
     - OIL_SPILL_MODEL_PATH: absolute or deployment-controlled relative local model path.
     - OIL_SPILL_MODEL_ENGINE: `torchscript` or `onnx`.
     - OIL_SPILL_MODEL_ID / OIL_SPILL_MODEL_VERSION: mandatory provenance labels.
+    - OIL_SPILL_MODEL_SHA256: mandatory SHA-256 of the approved local artifact.
     - OIL_SPILL_MODEL_INPUT_SIZE: square model input size (default 512).
     - OIL_SPILL_OIL_CLASS_INDEX: output channel representing oil (default 1).
     """
@@ -194,12 +197,26 @@ def model_from_environment() -> OilSpillSegmentationModel:
     path = Path(model_path_value).expanduser().resolve()
     if not path.is_file():
         raise ModelNotConfiguredError("OIL_SPILL_MODEL_PATH does not point to a readable local file")
+    model_id = os.getenv("OIL_SPILL_MODEL_ID")
+    model_version = os.getenv("OIL_SPILL_MODEL_VERSION")
+    configured_sha256 = os.getenv("OIL_SPILL_MODEL_SHA256")
+    if not model_id or not model_version or not configured_sha256:
+        raise ModelNotConfiguredError(
+            "OIL_SPILL_MODEL_ID, OIL_SPILL_MODEL_VERSION, and OIL_SPILL_MODEL_SHA256 are required "
+            "to enable raw-image inference."
+        )
+    actual_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual_sha256.lower() != configured_sha256.lower():
+        raise ModelNotConfiguredError(
+            "Configured model hash does not match OIL_SPILL_MODEL_PATH. Refusing to load an unverified artifact."
+        )
     engine = os.getenv("OIL_SPILL_MODEL_ENGINE", "torchscript").strip().lower()
     descriptor = ModelDescriptor(
-        model_id=os.getenv("OIL_SPILL_MODEL_ID", "unversioned-local-model"),
-        version=os.getenv("OIL_SPILL_MODEL_VERSION", "unversioned"),
+        model_id=model_id,
+        version=model_version,
         engine=engine,
         path=path,
+        artifact_sha256=actual_sha256,
         input_size=int(os.getenv("OIL_SPILL_MODEL_INPUT_SIZE", "512")),
         oil_class_index=int(os.getenv("OIL_SPILL_OIL_CLASS_INDEX", "1")),
     )

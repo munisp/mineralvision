@@ -18,6 +18,14 @@ REQUIRED_ROUTES = {
     "/api/oil-spill/incidents/{incident_id}",
     "/api/oil-spill/incidents/{incident_id}/review",
     "/api/oil-spill/incidents/{incident_id}/coverage-plan",
+    "/api/oil-spill/incidents/{incident_id}/events",
+    "/api/oil-spill/incidents/{incident_id}/export.geojson",
+    "/api/oil-spill/models",
+    "/api/oil-spill/models/{model_id}/{model_version}/evaluations",
+    "/api/oil-spill/models/{model_id}/{model_version}/promotion",
+    "/api/oil-spill/models/{model_id}/{model_version}/approve",
+    "/api/oil-spill/operations/summary",
+    "/api/oil-spill/temporal-consensus",
 }
 
 

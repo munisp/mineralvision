@@ -1,8 +1,7 @@
 """Alembic environment for the MineralVision API database.
 
-Targets ``src.api.database.Base.metadata`` and resolves the database URL
-from the DATABASE_URL environment variable (SQLite dev fallback when unset,
-matching src/api/database.py). A URL passed via config (``-x dburl=`` or
+Targets ``src.api.database.Base.metadata`` and resolves the required PostgreSQL
+URL from the DATABASE_URL environment variable. A URL passed via config (``-x dburl=`` or
 ``config.set_main_option``) takes precedence — used by tests.
 """
 
@@ -32,7 +31,12 @@ def _get_url() -> str:
     url = config.get_main_option("sqlalchemy.url")
     if url:
         return url
-    return os.environ.get("DATABASE_URL", "sqlite:///./mineralvision.db")
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError("DATABASE_URL is required for Alembic migrations")
+    if not url.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")):
+        raise RuntimeError("Alembic migrations require a PostgreSQL DATABASE_URL")
+    return url
 
 
 def run_migrations_offline() -> None:

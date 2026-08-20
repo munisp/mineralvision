@@ -124,3 +124,68 @@ def test_image_inference_fails_closed_without_a_configured_model(monkeypatch):
     monkeypatch.delenv("OIL_SPILL_MODEL_PATH", raising=False)
     with pytest.raises(ModelNotConfiguredError, match="Image inference is disabled"):
         model_from_environment()
+
+
+from api.oil_spill.governance import (
+    PROMOTION_THRESHOLDS,
+    evaluate_promotion_eligibility,
+    fuse_temporal_probabilities,
+)
+from api.oil_spill.schemas import EvaluationSplit
+
+
+def _passing_metrics() -> dict[str, float]:
+    return dict(PROMOTION_THRESHOLDS)
+
+
+def test_promotion_requires_sealed_evidence_for_every_intended_domain():
+    decision = evaluate_promotion_eligibility(
+        [("drone_rgb_daylight", EvaluationSplit.SEALED_HOLDOUT, 150, _passing_metrics())],
+        ["drone_rgb_daylight", "port_glare"],
+    )
+
+    assert not decision.eligible
+    assert "port_glare" in decision.reasons[0]
+
+
+def test_promotion_gate_requires_all_oil_class_metrics_and_minimum_sample_size():
+    weak_metrics = _passing_metrics()
+    weak_metrics["oil_iou"] = 0.94
+    decision = evaluate_promotion_eligibility(
+        [("drone_rgb_daylight", EvaluationSplit.SEALED_HOLDOUT, 150, weak_metrics)],
+        ["drone_rgb_daylight"],
+    )
+    assert not decision.eligible
+
+    passing = evaluate_promotion_eligibility(
+        [("drone_rgb_daylight", EvaluationSplit.SEALED_HOLDOUT, 150, _passing_metrics())],
+        ["drone_rgb_daylight"],
+    )
+    assert passing.eligible
+    assert not passing.reasons
+
+
+def test_temporal_consensus_uses_real_embeddings_without_fabricated_jepa_outputs():
+    maps = [
+        np.full((3, 3), 0.8, dtype=np.float32),
+        np.full((3, 3), 0.7, dtype=np.float32),
+        np.full((3, 3), 0.1, dtype=np.float32),
+    ]
+    result = fuse_temporal_probabilities(
+        maps,
+        jepa_embeddings=[[1.0, 0.0], [0.99, 0.01], [-1.0, 0.0]],
+    )
+
+    assert result.used_jepa_embeddings
+    assert sum(result.frame_weights) == pytest.approx(1.0, abs=1e-6)
+    assert result.probability_map.mean() > 0.5
+
+
+def test_temporal_consensus_marks_median_fallback_when_no_embeddings_are_supplied():
+    result = fuse_temporal_probabilities(
+        [np.full((2, 2), 0.2, dtype=np.float32), np.full((2, 2), 0.8, dtype=np.float32)],
+    )
+
+    assert not result.used_jepa_embeddings
+    assert result.probability_map.mean() == pytest.approx(0.5)
+    assert "jepa_embeddings_not_supplied_median_fusion_used" in result.quality_flags

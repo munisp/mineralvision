@@ -28,6 +28,7 @@ import {
   Leaf,
   Gem,
   Map as MapIcon,
+  Waves,
 } from 'lucide-react';
 
 interface NavItem {
@@ -65,6 +66,7 @@ const navigation: NavItem[] = [
   { name: '3D Visualization', href: '/visualization', icon: Eye },
   { name: 'Geophysics', href: '/inversion', icon: Magnet },
   { name: 'Reports', href: '/reports', icon: FileText },
+  { name: 'Oil Spill Operations', href: '/oil-spill', icon: Waves },
   { name: 'Sensor Fusion', href: '/sensor-fusion', icon: Radio },
   { name: 'Enhanced GNSS', href: '/gnss', icon: Navigation },
   { name: 'AI Insights', href: '/ai-insights', icon: Brain },

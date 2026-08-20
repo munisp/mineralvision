@@ -82,13 +82,29 @@ export default defineConfig({
       manifest: {
         name: 'MineralVision',
         short_name: 'MineralVision',
-        description: 'AI-Powered Mineral Exploration Platform',
+        description: 'AI-powered exploration and response decision support',
         theme_color: '#1e40af',
         background_color: '#0f172a',
         display: 'standalone',
-        orientation: 'portrait',
+        orientation: 'any',
         scope: '/',
         start_url: '/',
+        shortcuts: [
+          {
+            name: 'Oil Spill Operations',
+            short_name: 'Oil Spill',
+            description: 'Triage and review oil-spill evidence',
+            url: '/oil-spill',
+            icons: [{ src: 'pwa-192x192.png', sizes: '192x192' }],
+          },
+          {
+            name: 'Capture Field Evidence',
+            short_name: 'Capture',
+            description: 'Open field evidence capture',
+            url: '/oil-spill?capture=1',
+            icons: [{ src: 'pwa-192x192.png', sizes: '192x192' }],
+          },
+        ],
         icons: [
           {
             src: 'pwa-192x192.png',
@@ -110,22 +126,10 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/api\..*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
-          }
-        ]
+        // Incident evidence is authenticated and never cached by the service worker.
+        // The oil-spill page only keeps operator-submitted compact mask evidence in its
+        // explicit local queue until a secure API connection is available.
+        runtimeCaching: []
       }
     })
   ],

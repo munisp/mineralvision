@@ -41,12 +41,15 @@ services:
       MODEL_PRECISION: ${MODEL_PRECISION:-fp16}
       BATCH_SIZE: ${BATCH_SIZE:-4}
       PORT: "8000"
-      DATABASE_URI: sqlite:////app/data/waldo_detections.db
+      DATABASE_URI: postgresql://mineralvision:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/mineralvision
     volumes:
       - waldo-models:/app/models
       - waldo-data:/app/data
     ports:
       - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
       test:
         - CMD-SHELL

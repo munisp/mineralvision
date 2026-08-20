@@ -6,7 +6,7 @@ map pages render with real API data — the gap left open by the frontend missio
 ## Environment
 
 - Backend: `uvicorn api.main:app --port 8000` from `MineralVision_Final_Package/src`,
-  `SEED_DEMO=true ADMIN_INITIAL_PASSWORD=*** JWT_SECRET=*** DATABASE_URL=sqlite`,
+  `SEED_DEMO=true ADMIN_INITIAL_PASSWORD=*** JWT_SECRET=*** DATABASE_URL=postgresql://...`,
   `PYTHONPATH=MineralVision_Final_Package` (required — `seed_demo_data` imports
   `src.api.auth_middleware`). Demo data seeded; login `admin`.
 - Python deps installed: `sqlalchemy pyjwt prometheus_client xarray rasterio

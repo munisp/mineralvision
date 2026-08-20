@@ -29,6 +29,7 @@ from ..orchestration.middleware import (
     get_middleware_integration,
     initialize_middleware,
 )
+from ..auth_middleware import TokenPayload, require_auth
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,7 @@ async def get_journey(journey_id: str):
 async def start_journey(
     request: StartJourneyRequest,
     background_tasks: BackgroundTasks,
+    user: TokenPayload = Depends(require_auth),
 ):
     """Start a new journey workflow."""
     registry = get_journey_registry()
@@ -193,13 +195,13 @@ async def start_journey(
     if not manager.client.is_connected:
         await manager.initialize()
     
-    # Start the journey
-    # TODO: Get user_id from auth context
-    user_id = "current-user"
-    
+    # Bind the orchestration run to the authenticated caller for auditability.
+    if not user.user_id:
+        raise HTTPException(status_code=401, detail="Authenticated token does not contain a user id")
+
     run = await manager.start_journey(
         journey_id=request.journey_id,
-        user_id=user_id,
+        user_id=user.user_id,
         project_id=request.project_id,
         inputs=request.inputs,
     )

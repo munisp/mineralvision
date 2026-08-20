@@ -24,6 +24,8 @@ setup(
         "uvicorn[standard]==0.52.1",
         "pydantic==2.13.4",
         "sqlalchemy==2.0.51",
+        "alembic==1.19.1",
+        "psycopg2-binary==2.9.12",
         "PyJWT==2.13.0",
         "bcrypt==5.0.0",
         "numpy==2.5.1",
