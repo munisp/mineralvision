@@ -1,0 +1,74 @@
+# Reference benchmark configuration. It is NOT evidence that a model has passed.
+# Every frame from an incident_id is assigned to exactly one split.
+benchmark_name: offshore_oil_spill_incident_disjoint_v1
+seed: 20260820
+manifest_csv: data/oil_spill/benchmark_manifest.csv
+output_directory: artifacts/oil_spill_benchmark
+
+# The manifest must provide a binary reference mask and a prediction mask for each sample.
+required_columns:
+  - sample_id
+  - incident_id
+  - sequence_id
+  - frame_index
+  - image_path
+  - mask_path
+  - prediction_path
+  - domain
+  - sensor
+  - acquisition_date
+  - sea_state
+  - glint_level
+  - annotation_version
+
+split:
+  group_key: incident_id
+  # Allocation occurs within each declared domain after stable sorting by SHA-256(seed, group).
+  train_fraction: 0.60
+  validation_fraction: 0.20
+  sealed_holdout_fraction: 0.20
+  sealed_holdout_name: sealed_holdout
+  # Never use this split for epoch selection, early stopping, threshold tuning, or calibration.
+  sealed_holdout_locked: true
+
+# Each value requires an independently reportable sealed-holdout metric record.
+intended_domains:
+  - offshore_rgb_daylight
+  - offshore_rgb_glint
+  - port_rgb_complex_background
+  - offshore_sar
+
+# At least 100 valid labeled samples must be available per intended domain in the sealed holdout.
+# A domain with insufficient samples blocks promotion; it must not be silently pooled.
+minimum_sealed_holdout_samples_per_domain: 100
+
+mask_processing:
+  positive_class: oil
+  # Accepted reference-mask values for the oil class; adapt this list to the dataset label map.
+  reference_positive_values: [1, 255]
+  threshold: 0.50
+  ignore_value: null
+  minimum_valid_pixels_per_sample: 64
+
+bootstrap:
+  replicates: 2000
+  confidence_level: 0.95
+
+promotion_gate:
+  oil_f1: 0.97
+  oil_iou: 0.95
+  oil_precision: 0.97
+  oil_recall: 0.97
+
+leakage_controls:
+  # Required manifest values; the script reports errors if group leakage occurs.
+  prohibit_cross_split_group_key: true
+  report_strata:
+    - domain
+    - sensor
+    - sea_state
+    - glint_level
+    - annotation_version
+  # All frames from a flight/video sequence should share incident_id. If this cannot be
+  # guaranteed, create a composite incident group identifier before writing the manifest.
+  sequence_must_not_cross_incident: true
