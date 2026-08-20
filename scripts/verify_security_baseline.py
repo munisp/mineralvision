@@ -57,6 +57,7 @@ def main() -> None:
     policy = text("security/opa/mineralvision.rego")
     require("default decision" in policy and "default action" in policy, "OPA policy must deny unknown paths")
     require("mfa_required" in policy and "oil_spill.model.approve" in policy, "OPA MFA gate missing")
+    require('input.request.method == "PATCH"' in policy and '"oil_spill.review"' in policy, "OPA review mapping must match PATCH endpoint")
 
     workflow = text(".github/workflows/security-and-benchmark.yml")
     for term in ("permissions:\n  contents: read", "sealed-benchmark", "mineralvision-sealed-benchmark", "pip-audit"):

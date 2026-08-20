@@ -44,7 +44,7 @@ action := "oil_spill.model.register" if {
 }
 
 action := "oil_spill.review" if {
-  input.request.method == "POST"
+  input.request.method == "PATCH"
   contains(input.request.path, "/review")
   startswith(input.request.path, "/api/oil-spill/incidents/")
 }

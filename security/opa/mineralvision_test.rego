@@ -25,6 +25,22 @@ test_approver_requires_mfa if {
   not authz.decision.allow with input as input
 }
 
+test_reviewer_without_mfa_is_denied if {
+  input := object.union(base_input, {
+    "subject": {"roles": ["oil_spill_reviewer"], "mfa_verified": false, "project_ids": []},
+    "request": {"method": "PATCH", "path": "/api/oil-spill/incidents/incident-1/review"},
+  })
+  not authz.decision.allow with input as input
+}
+
+test_reviewer_with_mfa_can_review if {
+  input := object.union(base_input, {
+    "subject": {"roles": ["oil_spill_reviewer"], "mfa_verified": true, "project_ids": []},
+    "request": {"method": "PATCH", "path": "/api/oil-spill/incidents/incident-1/review"},
+  })
+  authz.decision.allow with input as input
+}
+
 test_approver_with_mfa_can_approve if {
   input := object.union(base_input, {
     "subject": {"roles": ["oil_spill_approver"], "mfa_verified": true, "project_ids": []},
