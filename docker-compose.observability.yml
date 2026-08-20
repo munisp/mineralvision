@@ -1,0 +1,103 @@
+# Apply with:
+# docker compose --env-file /secure/runtime/mineralvision.env \
+#   -f docker-compose.secure.yml -f docker-compose.observability.yml up -d
+#
+# The Docker daemon sends each selected container's stdout/stderr to the host-bound
+# Fluent Bit Forward listener. No SIEM port is exposed to the Internet.
+services:
+  fluent-bit:
+    image: ${FLUENT_BIT_IMAGE}
+    restart: unless-stopped
+    env_file: security/.env.security
+    environment:
+      ENV: ${ENV}
+      SIEM_FORWARD_HOST: ${SIEM_FORWARD_HOST}
+      SIEM_FORWARD_PORT: ${SIEM_FORWARD_PORT}
+      SIEM_FORWARD_SHARED_KEY: ${SIEM_FORWARD_SHARED_KEY}
+    command: ["/fluent-bit/bin/fluent-bit", "-c", "/fluent-bit/etc/fluent-bit.conf"]
+    ports:
+      - "127.0.0.1:24224:24224"
+    volumes:
+      - ./security/observability/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./security/observability/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      - ${SIEM_CA_CERT_PATH}:/fluent-bit/certs/siem-ca.pem:ro
+      - appsec-logs:/var/log/nano_agent:ro
+      - fluent-bit-state:/fluent-bit/state
+    networks: [application]
+    read_only: true
+    tmpfs: [/tmp, /run]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  caddy:
+    depends_on:
+      fluent-bit:
+        condition: service_started
+    logging: &siem_logging
+      driver: fluentd
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async-connect: "true"
+        fluentd-sub-second-precision: "true"
+        fluentd-retry-wait: "1s"
+        fluentd-max-retries: "0"
+        tag: "mineralvision.caddy"
+
+  apisix:
+    depends_on:
+      fluent-bit:
+        condition: service_started
+    logging:
+      <<: *siem_logging
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async-connect: "true"
+        fluentd-sub-second-precision: "true"
+        fluentd-retry-wait: "1s"
+        fluentd-max-retries: "0"
+        tag: "mineralvision.apisix"
+
+  appsec-agent:
+    depends_on:
+      fluent-bit:
+        condition: service_started
+    logging:
+      <<: *siem_logging
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async-connect: "true"
+        fluentd-sub-second-precision: "true"
+        fluentd-retry-wait: "1s"
+        fluentd-max-retries: "0"
+        tag: "mineralvision.appsec-agent"
+
+  keycloak:
+    depends_on:
+      fluent-bit:
+        condition: service_started
+    logging:
+      <<: *siem_logging
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async-connect: "true"
+        fluentd-sub-second-precision: "true"
+        fluentd-retry-wait: "1s"
+        fluentd-max-retries: "0"
+        tag: "mineralvision.keycloak"
+
+  api:
+    depends_on:
+      fluent-bit:
+        condition: service_started
+    logging:
+      <<: *siem_logging
+      options:
+        fluentd-address: "127.0.0.1:24224"
+        fluentd-async-connect: "true"
+        fluentd-sub-second-precision: "true"
+        fluentd-retry-wait: "1s"
+        fluentd-max-retries: "0"
+        tag: "mineralvision.api"
+
+volumes:
+  fluent-bit-state: {}
