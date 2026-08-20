@@ -21,7 +21,7 @@ setup(
     python_requires=">=3.10",
     install_requires=[
         "fastapi==0.141.1",
-        "uvicorn[standard]==0.52.1",
+        "uvicorn[standard]==0.52.3",
         "pydantic==2.13.4",
         "sqlalchemy==2.0.51",
         "alembic==1.19.1",
