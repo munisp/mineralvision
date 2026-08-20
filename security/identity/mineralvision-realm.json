@@ -1,0 +1,127 @@
+{
+  "realm": "mineralvision",
+  "enabled": true,
+  "displayName": "MineralVision",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": false,
+  "verifyEmail": true,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 900,
+  "ssoSessionMaxLifespan": 28800,
+  "offlineSessionIdleTimeout": 2592000,
+  "eventsEnabled": true,
+  "eventsListeners": ["jboss-logging"],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
+  "eventsExpiration": 7776000,
+  "passwordPolicy": "length(14) and digits(1) and lowerCase(1) and upperCase(1) and specialChars(1) and passwordHistory(12)",
+  "roles": {
+    "realm": [
+      {"name": "oil_spill_operator", "description": "Can submit evidence and request advisory coverage plans."},
+      {"name": "oil_spill_reviewer", "description": "Can perform accountable incident review after MFA."},
+      {"name": "oil_spill_evaluator", "description": "Can register artifacts and submit evaluated evidence."},
+      {"name": "oil_spill_approver", "description": "Can approve model promotion after MFA and independent review."},
+      {"name": "security_admin", "description": "Break-glass security administration; assign through an audited group only."}
+    ]
+  },
+  "groups": [
+    {"name": "oil-spill-operators", "realmRoles": ["oil_spill_operator"]},
+    {"name": "oil-spill-reviewers", "realmRoles": ["oil_spill_reviewer"]},
+    {"name": "oil-spill-evaluators", "realmRoles": ["oil_spill_evaluator"]},
+    {"name": "oil-spill-approvers", "realmRoles": ["oil_spill_approver"]},
+    {"name": "security-administrators", "realmRoles": ["security_admin"]}
+  ],
+  "clients": [
+    {
+      "clientId": "mineralvision-web",
+      "name": "MineralVision Web",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "redirectUris": ["https://app.example.com/*"],
+      "webOrigins": ["https://app.example.com"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://app.example.com/*"
+      },
+      "defaultClientScopes": ["profile", "email", "roles"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "mineralvision-api",
+      "name": "MineralVision API",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "implicitFlowEnabled": false,
+      "attributes": {"use.refresh.tokens": "false"}
+    }
+  ],
+  "requiredActions": [
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 10
+    },
+    {
+      "alias": "webauthn-register",
+      "name": "WebAuthn Register",
+      "providerId": "webauthn-register",
+      "enabled": true,
+      "defaultAction": true,
+      "priority": 20
+    },
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 30
+    }
+  ],
+  "authenticationFlows": [
+    {
+      "alias": "browser-mfa",
+      "description": "Password plus phishing-resistant WebAuthn authentication.",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {"authenticator": "auth-cookie", "requirement": "ALTERNATIVE", "priority": 10, "authenticatorFlow": false},
+        {"authenticator": "auth-username-password-form", "requirement": "REQUIRED", "priority": 20, "authenticatorFlow": false},
+        {"authenticator": "webauthn-authenticator", "requirement": "REQUIRED", "priority": 30, "authenticatorFlow": false}
+      ]
+    }
+  ],
+  "browserFlow": "browser-mfa",
+  "webAuthnPolicyRpEntityName": "MineralVision",
+  "webAuthnPolicyRpId": "app.example.com",
+  "webAuthnPolicySignatureAlgorithms": ["ES256", "RS256"],
+  "webAuthnPolicyAvoidSameAuthenticatorRegister": true,
+  "webAuthnPolicyAcceptableAaguids": []
+}

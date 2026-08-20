@@ -24,6 +24,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt
 import bcrypt
 
+from .security.oidc import OIDCConfigurationError, OIDCIdentity, OIDCTokenError, OIDCValidator
+
 logger = logging.getLogger(__name__)
 
 # Configuration
@@ -32,6 +34,12 @@ JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
 BCRYPT_WORK_FACTOR = 12
 
 ENV = os.getenv("ENV", os.getenv("ENVIRONMENT", "development")).lower()
+AUTH_MODE = os.getenv("AUTH_MODE", "local").lower()
+if AUTH_MODE not in {"local", "oidc"}:
+    raise RuntimeError("AUTH_MODE must be either 'local' or 'oidc'")
+if ENV == "production" and AUTH_MODE != "oidc":
+    raise RuntimeError("AUTH_MODE=oidc is required in production; local symmetric JWTs are not a production identity provider")
+OIDC_VALIDATOR: Optional[OIDCValidator] = OIDCValidator() if AUTH_MODE == "oidc" else None
 
 
 def _load_jwt_secret() -> str:
@@ -53,7 +61,9 @@ def _load_jwt_secret() -> str:
     return generated
 
 
-JWT_SECRET = _load_jwt_secret()
+# Local signing remains available only for development/test compatibility. OIDC mode
+# validates asymmetric Keycloak tokens and therefore never requires this secret.
+JWT_SECRET = _load_jwt_secret() if AUTH_MODE == "local" else ""
 
 security = HTTPBearer(auto_error=False)
 
@@ -62,11 +72,15 @@ class TokenPayload:
     """JWT token payload structure."""
 
     def __init__(self, user_id: str, username: str, email: str, role: str, exp: datetime,
-                 jti: Optional[str] = None):
+                 jti: Optional[str] = None, roles: Optional[list[str]] = None,
+                 project_ids: Optional[list[str]] = None, mfa_verified: bool = False):
         self.user_id = user_id
         self.username = username
         self.email = email
         self.role = role
+        self.roles = roles or ([role] if role else [])
+        self.project_ids = project_ids or []
+        self.mfa_verified = mfa_verified
         self.exp = exp
         self.jti = jti
 
@@ -82,6 +96,8 @@ def create_access_token(user_data: Dict[str, Any], expires_delta: Optional[timed
     Returns:
         Encoded JWT token string
     """
+    if AUTH_MODE == "oidc":
+        raise RuntimeError("Local access-token issuance is disabled when AUTH_MODE=oidc; use Keycloak OIDC tokens")
     if expires_delta is None:
         expires_delta = timedelta(hours=JWT_EXPIRATION_HOURS)
 
@@ -101,28 +117,43 @@ def create_access_token(user_data: Dict[str, Any], expires_delta: Optional[timed
 
 
 def decode_token(token: str) -> Optional[TokenPayload]:
-    """
-    Decode and validate a JWT token.
-
-    Returns:
-        TokenPayload if valid, None otherwise
-    """
+    """Decode a configured OIDC or development-only local bearer token."""
+    if AUTH_MODE == "oidc":
+        try:
+            if OIDC_VALIDATOR is None:
+                raise OIDCConfigurationError("OIDC validator is unavailable")
+            identity: OIDCIdentity = OIDC_VALIDATOR.validate(token)
+            return TokenPayload(
+                user_id=identity.subject,
+                username=identity.username,
+                email=identity.email,
+                role=identity.role,
+                roles=identity.roles,
+                project_ids=identity.project_ids,
+                mfa_verified=identity.mfa_verified,
+                exp=datetime.fromtimestamp(identity.expires_at),
+                jti=identity.token_id,
+            )
+        except (OIDCConfigurationError, OIDCTokenError):
+            return None
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         jti = payload.get("jti")
         if jti and is_token_blacklisted(jti):
             return None
+        role = payload.get("role", "user")
         return TokenPayload(
             user_id=payload.get("sub"),
             username=payload.get("username"),
             email=payload.get("email"),
-            role=payload.get("role", "user"),
+            role=role,
+            roles=[role],
+            project_ids=[],
+            mfa_verified=False,
             exp=datetime.fromtimestamp(payload.get("exp")),
-            jti=jti
+            jti=jti,
         )
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
+    except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
         return None
 
 
@@ -293,7 +324,10 @@ class JWTMiddleware:
             "id": payload.user_id,
             "username": payload.username,
             "email": payload.email,
-            "role": payload.role
+            "role": payload.role,
+            "roles": payload.roles,
+            "project_ids": payload.project_ids,
+            "mfa_verified": payload.mfa_verified,
         }
 
         await self.app(scope, receive, send)

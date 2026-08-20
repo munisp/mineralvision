@@ -1,0 +1,247 @@
+# Production-oriented reference deployment. Copy security/.env.security.example into
+# a secret manager or protected host environment before use. Do not use this file
+# with default/example values, and pin all images to vetted immutable digests.
+services:
+  caddy:
+    image: ${CADDY_IMAGE}
+    restart: unless-stopped
+    env_file: security/.env.security
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./security/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  # The APISIX image must be the official OpenAppSec attachment image selected
+  # during change control. Its admin port is intentionally not published.
+  apisix:
+    image: ${APPSEC_APISIX_IMAGE}
+    restart: unless-stopped
+    ipc: service:appsec-agent
+    environment:
+      APISIX_STAND_ALONE: "true"
+    volumes:
+      - ./security/apisix/apisix.yaml:/usr/local/apisix/conf/apisix.yaml:ro
+    expose: ["9080"]
+    networks: [edge, application]
+    depends_on:
+      appsec-agent:
+        condition: service_started
+      api:
+        condition: service_healthy
+      ui:
+        condition: service_started
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  # OpenAppSec supplies the inspection decision to its APISIX attachment over a
+  # shared IPC namespace. Start with a staging policy and validate before enablement.
+  appsec-agent:
+    image: ${APPSEC_AGENT_IMAGE}
+    restart: unless-stopped
+    ipc: shareable
+    environment:
+      APPSEC_AGENT_TOKEN: ${APPSEC_AGENT_TOKEN:-}
+      USER_EMAIL: ${APPSEC_USER_EMAIL:-}
+      APPSEC_AUTO_POLICY_LOAD: "false"
+    volumes:
+      - ./security/appsec/local_policy.yaml:/ext/appsec/local_policy.yaml:ro
+      - appsec-data:/etc/cp/data
+      - appsec-logs:/var/log/nano_agent
+    command: /cp-nano-agent
+    networks: [application]
+    security_opt: [no-new-privileges:true]
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    image: mineralvision/ui:secure
+    restart: unless-stopped
+    expose: ["80"]
+    networks: [application]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  api-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mineralvision/api:secure
+    restart: "no"
+    command: ["sh", "-c", "cd /app/MineralVision_Final_Package && alembic upgrade head"]
+    environment:
+      ENV: production
+      DATABASE_URL: postgresql+psycopg2://mineralvision_migrator:${POSTGRES_MIGRATOR_PASSWORD}@postgres:5432/mineralvision
+    networks: [data]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mineralvision/api:secure
+    restart: unless-stopped
+    env_file: security/.env.security
+    environment:
+      DATABASE_URL: postgresql+psycopg2://mineralvision_app:${POSTGRES_APP_PASSWORD}@postgres:5432/mineralvision
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      CORS_ORIGINS: https://${PUBLIC_FQDN}
+      AUTH_MODE: ${AUTH_MODE}
+      OIDC_ISSUER: ${OIDC_ISSUER}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE}
+      OIDC_JWKS_URL: ${OIDC_JWKS_URL}
+      OIDC_ALLOWED_ALGORITHMS: ${OIDC_ALLOWED_ALGORITHMS}
+      OPA_ENABLED: ${OPA_ENABLED}
+      OPA_URL: ${OPA_URL}
+      OPA_FAIL_CLOSED: ${OPA_FAIL_CLOSED}
+      WALDO_SERVICE_URL: http://waldo:8000
+    expose: ["8000"]
+    networks: [application, data]
+    depends_on:
+      api-migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      opa:
+        condition: service_started
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)\""]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  waldo:
+    build:
+      context: MineralVision_WALDO_Production_Package
+      dockerfile: deployment/cloud/Dockerfile
+    image: mineralvision/waldo:secure
+    restart: unless-stopped
+    environment:
+      PORT: "8000"
+      MODEL_PRECISION: ${MODEL_PRECISION:-fp16}
+      BATCH_SIZE: ${BATCH_SIZE:-4}
+      DATABASE_URI: postgresql+psycopg2://mineralvision_app:${POSTGRES_APP_PASSWORD}@postgres:5432/mineralvision
+    expose: ["8000"]
+    volumes:
+      - waldo-models:/app/models:ro
+      - waldo-data:/app/data
+    networks: [application, data]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  keycloak:
+    image: ${KEYCLOAK_IMAGE}
+    restart: unless-stopped
+    env_file: security/.env.security
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak_app
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD}
+      KC_PROXY_HEADERS: xforwarded
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME: https://${IDP_FQDN}
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+    command: ["start", "--import-realm"]
+    expose: ["8080"]
+    volumes:
+      - ./security/identity/mineralvision-realm.json:/opt/keycloak/data/import/mineralvision-realm.json:ro
+    networks: [edge, data]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  opa:
+    image: ${OPA_IMAGE}
+    restart: unless-stopped
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies"]
+    volumes:
+      - ./security/opa:/policies:ro
+    expose: ["8181"]
+    networks: [application]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  postgres:
+    image: ${POSTGRES_IMAGE}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD}
+      POSTGRES_DB: postgres
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+      POSTGRES_MIGRATOR_PASSWORD: ${POSTGRES_MIGRATOR_PASSWORD}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./security/postgres/01-init-users.sh:/docker-entrypoint-initdb.d/01-init-users.sh:ro
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  redis:
+    image: ${REDIS_IMAGE}
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}", "--protected-mode", "yes"]
+    volumes:
+      - redis-data:/data
+    networks: [data]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  edge: {}
+  application:
+    internal: true
+  data:
+    internal: true
+
+volumes:
+  caddy-data: {}
+  caddy-config: {}
+  appsec-data: {}
+  appsec-logs: {}
+  postgres-data: {}
+  redis-data: {}
+  waldo-models: {}
+  waldo-data: {}

@@ -46,6 +46,7 @@ METRIC_NAMES = ("oil_f1", "oil_iou", "oil_precision", "oil_recall", "pixel_accur
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--manifest", type=Path, default=None, help="Optional manifest override for a protected runner")
     parser.add_argument("--model-id", required=True)
     parser.add_argument("--model-version", required=True)
     parser.add_argument("--reviewer", required=True)
@@ -252,6 +253,10 @@ def main() -> int:
     args = parse_args()
     config_path = args.config.resolve()
     config = load_config(config_path)
+    if args.manifest is not None:
+        # The sealed manifest may exist only on an approved self-hosted runner.
+        # Its immutable path is intentionally not committed to the repository.
+        config["manifest_csv"] = str(args.manifest.resolve())
     manifest_path, rows = load_manifest(config, config_path)
     assignment = assign_incident_disjoint_splits(rows, config)
     output_dir = (ROOT / config["output_directory"]).resolve()

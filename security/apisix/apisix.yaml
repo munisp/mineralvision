@@ -1,0 +1,94 @@
+# APISIX standalone declarative configuration.
+# This file intentionally exposes no Admin API route or host port. Caddy is the
+# only public listener, and it overwrites the client-IP headers used as keys.
+routes:
+  - id: oil-spill-raw-image-inference
+    name: oil-spill-raw-image-inference
+    uri: /api/oil-spill/analyze/image
+    methods: [POST]
+    plugins:
+      limit-req:
+        rate: 2
+        burst: 4
+        nodelay: true
+        rejected_code: 429
+        rejected_msg: "Raw-image inference capacity is temporarily exhausted."
+        key_type: var
+        key: http_x_real_ip
+        policy: local
+      limit-count:
+        count: 30
+        time_window: 3600
+        rejected_code: 429
+        rejected_msg: "Hourly raw-image inference quota exceeded."
+        key_type: var
+        key: http_x_real_ip
+        policy: local
+    upstream:
+      type: roundrobin
+      nodes:
+        "api:8000": 1
+
+  - id: mineralvision-api
+    name: mineralvision-api
+    uri: /api/*
+    plugins:
+      limit-req:
+        rate: 25
+        burst: 50
+        nodelay: true
+        rejected_code: 429
+        rejected_msg: "Request rate exceeded."
+        key_type: var
+        key: http_x_real_ip
+        policy: local
+      limit-count:
+        count: 1200
+        time_window: 3600
+        rejected_code: 429
+        rejected_msg: "Hourly API quota exceeded."
+        key_type: var
+        key: http_x_real_ip
+        policy: local
+    upstream:
+      type: roundrobin
+      nodes:
+        "api:8000": 1
+
+  - id: mineralvision-health
+    name: mineralvision-health
+    uri: /health
+    methods: [GET]
+    plugins:
+      limit-req:
+        rate: 5
+        burst: 10
+        nodelay: true
+        rejected_code: 429
+        key_type: var
+        key: http_x_real_ip
+        policy: local
+    upstream:
+      type: roundrobin
+      nodes:
+        "api:8000": 1
+
+  - id: mineralvision-ui
+    name: mineralvision-ui
+    uri: /*
+    methods: [GET, HEAD]
+    plugins:
+      limit-req:
+        rate: 30
+        burst: 60
+        nodelay: true
+        rejected_code: 429
+        key_type: var
+        key: http_x_real_ip
+        policy: local
+    upstream:
+      type: roundrobin
+      nodes:
+        "ui:80": 1
+
+#END

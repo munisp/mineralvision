@@ -49,3 +49,15 @@ models/
 *.onnx
 mlruns/
 wandb/
+
+# Security deployment secrets and local state
+security/.env.security
+security/appsec/*.token
+security/appsec/data/
+security/appsec/logs/
+
+# Benchmark data and output evidence (store sealed inputs outside the repository)
+data/oil_spill/
+artifacts/oil_spill_benchmark/
+test_artifacts/
+.benchmark-venv/

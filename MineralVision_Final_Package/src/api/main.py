@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 # Database and security infrastructure
 from .database import init_db, seed_demo_data
 from .auth_middleware import JWTMiddleware
+from .security.opa import OPAMiddleware
 
 # Core routers
 from .endpoints.auth import router as auth_router
@@ -135,6 +136,9 @@ app = FastAPI(
 # by the Prometheus scraper without a token. Do not expose it on the public
 # internet without adding auth.
 JWTMiddleware.PUBLIC_PATHS.add("/metrics")
+# Add OPA first so JWT middleware (added second) establishes request identity
+# before policy evaluation. Other middleware may remain outermost for telemetry.
+app.add_middleware(OPAMiddleware)
 app.add_middleware(JWTMiddleware, enforce=True)
 
 # Configure CORS from environment (never '*' with credentials)
@@ -187,7 +191,7 @@ async def api_status():
         "status": "operational",
         "timestamp": datetime.utcnow().isoformat(),
         "version": "1.0.0",
-        "authentication": "jwt",
+        "authentication": os.environ.get("AUTH_MODE", "local"),
         "services": {
             "projects": "active",
             "drillholes": "active",

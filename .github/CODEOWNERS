@@ -1,0 +1,11 @@
+# Enable a branch rule that requires Code Owner review for these paths.
+# Replace @munisp with the organization security team handle during deployment.
+/.github/ @munisp
+/security/ @munisp
+/docker-compose.secure.yml @munisp
+/MineralVision_Final_Package/src/api/security/ @munisp
+/MineralVision_Final_Package/src/api/auth_middleware.py @munisp
+/MineralVision_Final_Package/src/api/main.py @munisp
+/MineralVision_Final_Package/alembic/ @munisp
+/benchmarks/ @munisp
+/configs/oil_spill_incident_disjoint_benchmark.yaml @munisp

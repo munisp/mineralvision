@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db, UserModel
 from ..auth_middleware import (
-    create_access_token, verify_password, hash_password,
+    AUTH_MODE, create_access_token, verify_password, hash_password,
     require_auth, blacklist_token, TokenPayload, JWT_EXPIRATION_HOURS
 )
 
@@ -51,6 +51,14 @@ class PasswordChangeRequest(BaseModel):
 class PasswordResetRequest(BaseModel):
     """Schema for password reset request."""
     email: str
+
+
+def _require_local_auth() -> None:
+    if AUTH_MODE == "oidc":
+        raise HTTPException(
+            status_code=410,
+            detail="Local credentials are disabled. Authenticate and manage passwords through the configured identity provider.",
+        )
 
 
 def _user_response(user: UserModel) -> Dict[str, Any]:
@@ -90,7 +98,8 @@ def _token_response(user: UserModel) -> Dict[str, Any]:
 
 @router.post("/login")
 async def login(request: LoginRequest, db: Session = Depends(get_db)):
-    """Authenticate user (by username or email) and return a JWT token."""
+    """Development-only local login; production OIDC delegates to Keycloak."""
+    _require_local_auth()
     user = db.query(UserModel).filter(
         (UserModel.username == request.username) | (UserModel.email == request.username)
     ).first()
@@ -106,7 +115,8 @@ async def login(request: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/register", status_code=201)
 async def register(request: RegisterRequest, db: Session = Depends(get_db)):
-    """Register a new user."""
+    """Development-only local registration; production OIDC delegates to Keycloak."""
+    _require_local_auth()
     if db.query(UserModel).filter(UserModel.username == request.username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
 
@@ -135,7 +145,9 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/logout")
 async def logout(user: TokenPayload = Depends(require_auth)):
-    """Logout user by blacklisting the current token."""
+    """Development logout; OIDC logout must use the provider end-session endpoint."""
+    if AUTH_MODE == "oidc":
+        raise HTTPException(status_code=410, detail="Use the identity provider end-session endpoint for OIDC logout")
     blacklist_token(user.jti)
     return {"status": "logged_out"}
 
@@ -143,7 +155,8 @@ async def logout(user: TokenPayload = Depends(require_auth)):
 @router.post("/refresh")
 async def refresh_token(user: TokenPayload = Depends(require_auth),
                         db: Session = Depends(get_db)):
-    """Issue a new access token for the authenticated user."""
+    """Development-only token refresh; OIDC clients use provider refresh rotation."""
+    _require_local_auth()
     db_user = db.query(UserModel).filter(UserModel.id == user.user_id).first()
     if not db_user or not db_user.is_active:
         raise HTTPException(status_code=401, detail="User not found or disabled")
@@ -159,7 +172,8 @@ async def change_password(
     user: TokenPayload = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
-    """Change the authenticated user's password."""
+    """Development-only password change; OIDC delegates this to Keycloak."""
+    _require_local_auth()
     db_user = db.query(UserModel).filter(UserModel.id == user.user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -179,7 +193,8 @@ async def change_password(
 
 @router.post("/reset-password")
 async def reset_password(request: PasswordResetRequest):
-    """Request password reset (enumeration-safe)."""
+    """Development-only reset placeholder; OIDC delegates this to Keycloak."""
+    _require_local_auth()
     return {
         "status": "reset_email_sent",
         "message": "If the email exists, a password reset link has been sent"
@@ -191,7 +206,16 @@ async def get_current_user_info(
     user: TokenPayload = Depends(require_auth),
     db: Session = Depends(get_db)
 ):
-    """Get current authenticated user info."""
+    """Return local or OIDC token identity without requiring a duplicate local user."""
+    if AUTH_MODE == "oidc":
+        return {
+            "id": user.user_id,
+            "username": user.username,
+            "email": user.email,
+            "roles": user.roles,
+            "role": user.role,
+            "mfa_verified": user.mfa_verified,
+        }
     db_user = db.query(UserModel).filter(UserModel.id == user.user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
