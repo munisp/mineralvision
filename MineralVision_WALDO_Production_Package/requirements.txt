@@ -18,7 +18,7 @@ supervision==0.30.0
 # Vision & science
 numpy==2.2.6
 scipy==1.15.3
-matplotlib==3.10.8
+matplotlib==3.11.1
 pillow==12.3.0
 opencv-python-headless==5.0.0.93
 
