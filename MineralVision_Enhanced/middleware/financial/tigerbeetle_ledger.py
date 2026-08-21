@@ -17,6 +17,7 @@ accounting database with safety guarantees.
 import asyncio
 import json
 import logging
+import os
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -697,3 +698,409 @@ async def create_and_connect_tigerbeetle(config: TigerBeetleConfig = None) -> Ti
     ledger = TigerBeetleLedger(config)
     await ledger.connect()
     return ledger
+
+
+# ---------------------------------------------------------------------------
+# High-assurance real-value transfer controls
+# ---------------------------------------------------------------------------
+# This layer is intentionally separate from the exploration platform API.  It
+# must be enabled only after the PostgreSQL migration, KMS-backed audit key,
+# regulated payment partner review, and an independent security assessment.
+
+class TransferControlError(RuntimeError):
+    """Raised when a transfer-control invariant is not satisfied."""
+
+
+class IdempotencyConflict(TransferControlError):
+    """The same idempotency key was reused with different business input."""
+
+
+@dataclass(frozen=True)
+class TransferIntent:
+    """Immutable business request for a real-value transfer in minor units."""
+    idempotency_key: str
+    actor_id: str
+    debit_account_id: int
+    credit_account_id: int
+    amount: int
+    currency: str
+    ledger: int
+    code: int
+    purpose: str
+    external_reference: str
+
+    def canonical_payload(self) -> Dict[str, Any]:
+        return {
+            "idempotency_key": self.idempotency_key,
+            "actor_id": self.actor_id,
+            "debit_account_id": self.debit_account_id,
+            "credit_account_id": self.credit_account_id,
+            "amount": self.amount,
+            "currency": self.currency,
+            "ledger": self.ledger,
+            "code": self.code,
+            "purpose": self.purpose,
+            "external_reference": self.external_reference,
+        }
+
+    def payload_hash(self) -> str:
+        return hashlib.sha256(
+            json.dumps(self.canonical_payload(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+
+    def tigerbeetle_id(self) -> int:
+        """Derive the retry-stable non-zero 128-bit TigerBeetle object ID."""
+        digest = hashlib.sha256(f"mineralvision-transfer:{self.idempotency_key}".encode("utf-8")).digest()[:16]
+        value = int.from_bytes(digest, "big")
+        return value if value else 1
+
+
+@dataclass(frozen=True)
+class TransferApproval:
+    """Authenticated, step-up verified maker-checker approval evidence."""
+    approver_id: str
+    assurance: str
+    challenge_id: str
+    approved_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass(frozen=True)
+class TransferPolicy:
+    """Static limits; fetch dynamically from an independently managed policy store in production."""
+    currency: str
+    maximum_minor_amount: int
+    approvals_required: int = 2
+    accepted_assurance: Tuple[str, ...] = ("aal2", "aal3")
+
+
+@dataclass
+class ControlledTransferReceipt:
+    idempotency_key: str
+    tigerbeetle_transfer_id: int
+    status: str
+    request_hash: str
+    audit_event_hash: str
+    result: TransferResult
+
+
+class TransferControlStore(ABC):
+    """Durable state required to make business idempotency observable and auditable."""
+
+    durable: bool = False
+
+    @abstractmethod
+    async def reserve(self, intent: TransferIntent) -> Optional[ControlledTransferReceipt]:
+        """Atomically reserve an idempotency key or return the prior receipt."""
+
+    @abstractmethod
+    async def record_approvals(self, intent: TransferIntent, approvals: List[TransferApproval]) -> None:
+        """Persist independent maker-checker approval evidence before submission."""
+
+    @abstractmethod
+    async def complete(self, receipt: ControlledTransferReceipt) -> None:
+        """Persist the immutable completion outcome."""
+
+    @abstractmethod
+    async def append_audit(self, event_type: str, intent: TransferIntent, actor_id: str, details: Dict[str, Any]) -> str:
+        """Append a tamper-evident event and return its hash."""
+
+
+class InMemoryTransferControlStore(TransferControlStore):
+    """Test double only.  It is deliberately rejected for production transfers."""
+
+    durable = False
+
+    def __init__(self, audit_key: bytes = b"test-only-audit-key"):
+        self._receipts: Dict[str, ControlledTransferReceipt] = {}
+        self._hashes: Dict[str, str] = {}
+        self._approvals: Dict[str, List[TransferApproval]] = {}
+        self._audit_key = audit_key
+        self._lock = asyncio.Lock()
+
+    async def reserve(self, intent: TransferIntent) -> Optional[ControlledTransferReceipt]:
+        async with self._lock:
+            previous = self._receipts.get(intent.idempotency_key)
+            if previous and previous.request_hash != intent.payload_hash():
+                raise IdempotencyConflict("idempotency key cannot be reused with different transfer input")
+            return previous
+
+    async def record_approvals(self, intent: TransferIntent, approvals: List[TransferApproval]) -> None:
+        async with self._lock:
+            self._approvals[intent.idempotency_key] = list(approvals)
+
+    async def complete(self, receipt: ControlledTransferReceipt) -> None:
+        async with self._lock:
+            previous = self._receipts.get(receipt.idempotency_key)
+            if previous and previous.request_hash != receipt.request_hash:
+                raise IdempotencyConflict("completion conflicts with original idempotent request")
+            self._receipts[receipt.idempotency_key] = receipt
+
+    async def append_audit(self, event_type: str, intent: TransferIntent, actor_id: str, details: Dict[str, Any]) -> str:
+        async with self._lock:
+            prior_hash = self._hashes.get(intent.idempotency_key, "")
+            event = {
+                "event_type": event_type,
+                "intent": intent.canonical_payload(),
+                "actor_id": actor_id,
+                "details": details,
+                "previous_hash": prior_hash,
+            }
+            encoded = json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            event_hash = hashlib.sha256(self._audit_key + encoded).hexdigest()
+            self._hashes[intent.idempotency_key] = event_hash
+            return event_hash
+
+
+def _validate_controlled_intent(intent: TransferIntent, policy: TransferPolicy) -> None:
+    _validate_transfer_request(intent.debit_account_id, intent.credit_account_id, intent.amount)
+    if not intent.idempotency_key or len(intent.idempotency_key) > 128:
+        raise TransferControlError("idempotency_key is required and must not exceed 128 characters")
+    if not intent.actor_id or not intent.external_reference or not intent.purpose:
+        raise TransferControlError("actor_id, external_reference, and purpose are required")
+    if intent.currency != policy.currency:
+        raise TransferControlError("transfer currency does not match the applicable policy")
+    if intent.amount > policy.maximum_minor_amount:
+        raise TransferControlError("transfer exceeds the approved minor-unit limit")
+    if intent.ledger <= 0 or intent.code <= 0:
+        raise TransferControlError("ledger and transfer code must be positive and explicitly assigned")
+
+
+def _validate_approvals(intent: TransferIntent, approvals: List[TransferApproval], policy: TransferPolicy) -> None:
+    unique_approvers = {approval.approver_id for approval in approvals}
+    if intent.actor_id in unique_approvers:
+        raise TransferControlError("maker may not approve their own transfer")
+    if len(unique_approvers) < policy.approvals_required:
+        raise TransferControlError("insufficient distinct maker-checker approvals")
+    for approval in approvals:
+        if approval.assurance not in policy.accepted_assurance or not approval.challenge_id:
+            raise TransferControlError("approval lacks verified step-up MFA assurance evidence")
+
+
+async def _transfer_with_explicit_id(
+    manager: TransferManager, intent: TransferIntent
+) -> TransferResult:
+    """Submit a retry-stable TigerBeetle transfer ID rather than a process-local counter."""
+    transfer = Transfer(
+        id=intent.tigerbeetle_id(),
+        debit_account_id=intent.debit_account_id,
+        credit_account_id=intent.credit_account_id,
+        amount=intent.amount,
+        ledger=intent.ledger,
+        code=intent.code,
+        user_data_128=int.from_bytes(hashlib.sha256(intent.external_reference.encode("utf-8")).digest()[:16], "big"),
+    )
+    results = await manager.client.create_transfers([transfer])
+    result = results[0]
+    # TigerBeetle's `exists` is the expected reply after a lost response/retry
+    # for the same stable transfer ID. It is reconciled as an idempotent success.
+    if not result.success and result.error_code == "exists":
+        return TransferResult(transfer_id=transfer.id, success=True, error_code="idempotent_replay")
+    return result
+
+
+class RegulatedTransferService:
+    """Policy-gated transfer coordinator for future real-value integration.
+
+    It intentionally has no HTTP endpoint.  A future payments service must call
+    this only after OIDC/OPA authorization, sanctions/KYC checks, a durable
+    PostgreSQL control store, and external reconciliation are configured.
+    """
+
+    def __init__(self, manager: TransferManager, store: TransferControlStore, production: bool = False):
+        if production and not store.durable:
+            raise TransferControlError("production transfers require a durable PostgreSQL control and audit store")
+        self.manager = manager
+        self.store = store
+        self.production = production
+
+    async def submit(
+        self, intent: TransferIntent, approvals: List[TransferApproval], policy: TransferPolicy
+    ) -> ControlledTransferReceipt:
+        _validate_controlled_intent(intent, policy)
+        _validate_approvals(intent, approvals, policy)
+        existing = await self.store.reserve(intent)
+        if existing:
+            return existing
+
+        await self.store.record_approvals(intent, approvals)
+        await self.store.append_audit(
+            "transfer_requested", intent, intent.actor_id,
+            {"approvers": [approval.approver_id for approval in approvals], "request_hash": intent.payload_hash()},
+        )
+        result = await _transfer_with_explicit_id(self.manager, intent)
+        if not result.success:
+            audit_hash = await self.store.append_audit(
+                "transfer_rejected", intent, intent.actor_id, {"error_code": result.error_code}
+            )
+            raise TransferControlError(f"ledger rejected transfer: {result.error_code}; audit={audit_hash}")
+        audit_hash = await self.store.append_audit(
+            "transfer_posted", intent, intent.actor_id,
+            {"tigerbeetle_transfer_id": result.transfer_id, "replay": result.error_code == "idempotent_replay"},
+        )
+        receipt = ControlledTransferReceipt(
+            idempotency_key=intent.idempotency_key,
+            tigerbeetle_transfer_id=result.transfer_id,
+            status="posted",
+            request_hash=intent.payload_hash(),
+            audit_event_hash=audit_hash,
+            result=result,
+        )
+        await self.store.complete(receipt)
+        return receipt
+
+
+class TransferInProgress(TransferControlError):
+    """A matching idempotency key is already being reconciled; caller must retry."""
+
+
+class PostgresTransferControlStore(TransferControlStore):
+    """PostgreSQL-backed idempotency and tamper-evident audit store.
+
+    The schema is installed by Alembic revision ``0003_financial_transfer_controls``.
+    This store never creates tables at runtime.  The HMAC audit key must be loaded
+    from a secret manager and rotated with a documented key-version procedure.
+    """
+
+    durable = True
+
+    def __init__(self, database_url: str, audit_hmac_key: str, key_version: str = "v1"):
+        if not database_url.startswith(("postgres://", "postgresql://", "postgresql+")):
+            raise TransferControlError("durable transfer controls require a PostgreSQL URL")
+        if len(audit_hmac_key) < 32:
+            raise TransferControlError("LEDGER_AUDIT_HMAC_KEY must be at least 32 characters")
+        self.database_url = database_url.replace("postgresql+psycopg2://", "postgresql://")
+        self.audit_key = audit_hmac_key.encode("utf-8")
+        self.key_version = key_version
+
+    def _connect(self):
+        try:
+            import psycopg2
+        except ImportError as exc:
+            raise TransferControlError("psycopg2 is required for the PostgreSQL transfer-control store") from exc
+        return psycopg2.connect(self.database_url)
+
+    @staticmethod
+    def _receipt_from_json(data: Dict[str, Any]) -> ControlledTransferReceipt:
+        result = TransferResult(
+            transfer_id=int(data["result"]["transfer_id"]),
+            success=bool(data["result"]["success"]),
+            error_code=data["result"].get("error_code"),
+        )
+        return ControlledTransferReceipt(
+            idempotency_key=data["idempotency_key"],
+            tigerbeetle_transfer_id=int(data["tigerbeetle_transfer_id"]),
+            status=data["status"],
+            request_hash=data["request_hash"],
+            audit_event_hash=data["audit_event_hash"],
+            result=result,
+        )
+
+    @staticmethod
+    def _receipt_json(receipt: ControlledTransferReceipt) -> str:
+        return json.dumps({
+            "idempotency_key": receipt.idempotency_key,
+            "tigerbeetle_transfer_id": str(receipt.tigerbeetle_transfer_id),
+            "status": receipt.status,
+            "request_hash": receipt.request_hash,
+            "audit_event_hash": receipt.audit_event_hash,
+            "result": {
+                "transfer_id": str(receipt.result.transfer_id),
+                "success": receipt.result.success,
+                "error_code": receipt.result.error_code,
+            },
+        }, sort_keys=True, separators=(",", ":"))
+
+    async def reserve(self, intent: TransferIntent) -> Optional[ControlledTransferReceipt]:
+        return await asyncio.to_thread(self._reserve_sync, intent)
+
+    def _reserve_sync(self, intent: TransferIntent) -> Optional[ControlledTransferReceipt]:
+        request_hash = intent.payload_hash()
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO financial_transfer_intents
+                    (idempotency_key, request_hash, actor_id, state, intent_payload)
+                VALUES (%s, %s, %s, 'in_progress', %s::jsonb)
+                ON CONFLICT (idempotency_key) DO NOTHING
+                """,
+                (intent.idempotency_key, request_hash, intent.actor_id,
+                 json.dumps(intent.canonical_payload(), sort_keys=True)),
+            )
+            if cursor.rowcount == 1:
+                return None
+            cursor.execute(
+                "SELECT request_hash, state, receipt FROM financial_transfer_intents WHERE idempotency_key = %s FOR UPDATE",
+                (intent.idempotency_key,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise TransferControlError("idempotency reservation disappeared")
+            existing_hash, state, receipt = row
+            if existing_hash != request_hash:
+                raise IdempotencyConflict("idempotency key cannot be reused with different transfer input")
+            if state == "posted" and receipt:
+                return self._receipt_from_json(receipt)
+            raise TransferInProgress("matching transfer is in progress or requires reconciliation; retry with the same key")
+
+    async def record_approvals(self, intent: TransferIntent, approvals: List[TransferApproval]) -> None:
+        await asyncio.to_thread(self._record_approvals_sync, intent, approvals)
+
+    def _record_approvals_sync(self, intent: TransferIntent, approvals: List[TransferApproval]) -> None:
+        with self._connect() as connection, connection.cursor() as cursor:
+            for approval in approvals:
+                cursor.execute(
+                    """
+                    INSERT INTO financial_transfer_approvals
+                        (idempotency_key, approver_id, assurance, challenge_id, decision)
+                    VALUES (%s, %s, %s, %s, 'approved')
+                    ON CONFLICT (idempotency_key, approver_id) DO NOTHING
+                    """,
+                    (intent.idempotency_key, approval.approver_id, approval.assurance, approval.challenge_id),
+                )
+
+    async def complete(self, receipt: ControlledTransferReceipt) -> None:
+        await asyncio.to_thread(self._complete_sync, receipt)
+
+    def _complete_sync(self, receipt: ControlledTransferReceipt) -> None:
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE financial_transfer_intents
+                SET state = 'posted', receipt = %s::jsonb, completed_at = NOW()
+                WHERE idempotency_key = %s AND request_hash = %s AND state = 'in_progress'
+                """,
+                (self._receipt_json(receipt), receipt.idempotency_key, receipt.request_hash),
+            )
+            if cursor.rowcount != 1:
+                raise TransferControlError("transfer completion state changed; reconcile TigerBeetle before retrying")
+
+    async def append_audit(self, event_type: str, intent: TransferIntent, actor_id: str, details: Dict[str, Any]) -> str:
+        return await asyncio.to_thread(self._append_audit_sync, event_type, intent, actor_id, details)
+
+    def _append_audit_sync(self, event_type: str, intent: TransferIntent, actor_id: str, details: Dict[str, Any]) -> str:
+        with self._connect() as connection, connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT event_hash FROM financial_transfer_audit_events WHERE idempotency_key = %s ORDER BY sequence DESC LIMIT 1 FOR UPDATE",
+                (intent.idempotency_key,),
+            )
+            previous_hash = (cursor.fetchone() or [""])[0]
+            event = {
+                "event_type": event_type,
+                "intent": intent.canonical_payload(),
+                "actor_id": actor_id,
+                "details": details,
+                "previous_hash": previous_hash,
+                "key_version": self.key_version,
+            }
+            encoded = json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            event_hash = hashlib.sha256(self.audit_key + encoded).hexdigest()
+            cursor.execute(
+                """
+                INSERT INTO financial_transfer_audit_events
+                    (idempotency_key, event_type, actor_id, details, previous_hash, event_hash, key_version)
+                VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s)
+                """,
+                (intent.idempotency_key, event_type, actor_id,
+                 json.dumps(details, sort_keys=True), previous_hash, event_hash, self.key_version),
+            )
+            return event_hash

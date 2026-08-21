@@ -5,6 +5,7 @@ database with seeded ProjectModel/DrillholeModel/SampleModel rows via a
 FastAPI dependency override of ``get_db``.
 """
 
+import os
 import sys
 import uuid
 
@@ -20,7 +21,7 @@ from api.innovations.geolibre.routes import router
 
 
 # ---------------------------------------------------------------------------
-# fixtures: real sqlite DB with seeded project + drillholes + assays
+# fixtures: isolated PostgreSQL DB with seeded project + drillholes + assays
 # ---------------------------------------------------------------------------
 
 PROJECT_ID = str(uuid.uuid4())
@@ -34,9 +35,11 @@ EXP_MEAN = {"DH001": 2.0, "DH002": 0.8, "DH003": 1.5666666666666667}
 
 
 @pytest.fixture()
-def db_session(tmp_path):
-    engine = create_engine(f"sqlite:///{tmp_path}/geolibre_test.db",
-                           connect_args={"check_same_thread": False})
+def db_session():
+    database_url = os.environ.get("MV_TEST_DATABASE_URL") or os.environ.get("DATABASE_URL", "")
+    if not database_url.startswith(("postgres://", "postgresql://", "postgresql+")):
+        raise RuntimeError("MV_TEST_DATABASE_URL/DATABASE_URL must be an isolated PostgreSQL URL for GeoLibre tests")
+    engine = create_engine(database_url)
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()

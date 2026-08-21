@@ -1,0 +1,22 @@
+services:
+  postgres-ci:
+    image: postgis/postgis:16-3.5
+    environment:
+      POSTGRES_DB: mineralvision_ci
+      POSTGRES_USER: mineralvision_ci
+      POSTGRES_PASSWORD: ${CI_POSTGRES_PASSWORD:?set CI_POSTGRES_PASSWORD in CI secrets or the local shell}
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - log_statement=none
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mineralvision_ci -d mineralvision_ci"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data

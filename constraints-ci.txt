@@ -1,0 +1,9 @@
+# Shared CI security constraints. All production dependency updates must pass
+# `uv lock --locked` and `pip-audit --require-hashes` against the generated lock.
+# These package floors address advisories observed in the audit environment.
+pypdf>=6.15.0
+setuptools>=78.1.1
+wheel>=0.46.2
+
+# xhtml2pdf was not declared by this repository. It must not be pulled into a
+# production environment without an explicit reviewed dependency declaration.

@@ -67,7 +67,8 @@ def database_url() -> str:
 
 
 def is_postgres() -> bool:
-    return database_url().startswith(("postgres://", "postgresql://"))
+    """Recognize PostgreSQL URLs with or without a SQLAlchemy driver suffix."""
+    return database_url().startswith(("postgres://", "postgresql://", "postgresql+"))
 
 
 def get_engine():

@@ -1,11 +1,11 @@
 """
 Tests for the geodb bridge innovation module.
 
-Seeds a temporary sqlite database with real drillholes/samples via the
-platform SQLAlchemy models, builds the spatial index, and runs real
-bbox/near queries asserting actual returned IDs and distances. Also tests
-the lakehouse parquet sync (real pyarrow write + read-back row count) and
-the Sedona availability status. No mocks, no skips.
+Seeds the isolated PostgreSQL/PostGIS CI database with real drillholes and
+samples via the platform SQLAlchemy models, builds the spatial index, and
+runs real bbox/near queries asserting actual returned IDs and distances. It
+also tests the lakehouse parquet sync and Sedona availability status. No
+mocks or SQLite fallback are used in CI.
 """
 
 import atexit
@@ -21,11 +21,13 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "MineralVision_Final_Package", "src")
 sys.path.insert(0, os.path.join(REPO_ROOT, "MineralVision_Enhanced", "lakehouse_architecture"))
 
 _TMPDIR = tempfile.mkdtemp(prefix="geodb_test_")
-_DB_PATH = os.path.join(_TMPDIR, "geodb_test.db")
 _LAKEHOUSE = os.path.join(_TMPDIR, "lakehouse")
 
 _PREV_ENV = {k: os.environ.get(k) for k in ("DATABASE_URL", "GEODB_LAKEHOUSE_PATH")}
-os.environ["DATABASE_URL"] = f"sqlite:///{_DB_PATH}"
+_TEST_DATABASE_URL = os.environ.get("MV_TEST_DATABASE_URL") or os.environ.get("DATABASE_URL", "")
+if not _TEST_DATABASE_URL.startswith(("postgres://", "postgresql://", "postgresql+")):
+    raise RuntimeError("MV_TEST_DATABASE_URL/DATABASE_URL must be an isolated PostgreSQL URL for GeoDB tests")
+os.environ["DATABASE_URL"] = _TEST_DATABASE_URL
 os.environ["GEODB_LAKEHOUSE_PATH"] = _LAKEHOUSE
 
 
@@ -130,22 +132,22 @@ def seed_database():
     yield
 
 
-def test_spatial_enable_sqlite_fallback():
+def test_spatial_enable_postgis():
     resp = client.post("/innovations/geodb/spatial/enable")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["dialect"] == "sqlite"
+    assert body["dialect"] == "postgres"
     assert body["enabled"] is True
-    assert body["mode"] == "sqlite-grid"
+    assert body["mode"] == "postgis"
 
 
 def test_spatial_status():
     resp = client.get("/innovations/geodb/spatial/status")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["database_dialect"] == "sqlite"
+    assert body["database_dialect"] == "postgres"
     assert body["spatial_enabled"] is True
-    assert body["index_backend"] in ("grid", "rtree")
+    assert body["mode"] == "postgis"
 
 
 def test_index_drillholes():

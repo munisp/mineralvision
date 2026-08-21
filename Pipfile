@@ -1,0 +1,22 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[requires]
+python_version = "3.12"
+
+[packages]
+mineralvision = {path = ".", editable = true, extras = ["ml"]}
+
+[dev-packages]
+mineralvision = {path = ".", editable = true, extras = ["ml", "dev"]}
+bandit = "==1.9.4"
+pip-audit = "==2.10.0"
+detect-secrets = "==1.5.0"
+
+[scripts]
+test = "pytest -q"
+test-ci = "bash scripts/ci_full_test.sh"
+security = "bandit -q -r MineralVision_Final_Package/src MineralVision_Enhanced && pip-audit --local"
+lock-verify = "uv lock --locked"

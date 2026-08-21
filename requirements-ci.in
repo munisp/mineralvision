@@ -1,0 +1,9 @@
+# Full CI test environment. Resolve this input with uv/pip-tools and commit the
+# generated lock; do not install unpinned package sets directly in CI.
+-r requirements-dev.txt
+-r requirements-ml.txt
+
+# CI-only test and security tools.
+bandit==1.9.4
+pip-audit==2.10.0
+detect-secrets==1.5.0

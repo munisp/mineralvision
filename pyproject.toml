@@ -42,6 +42,7 @@ dependencies = [
     "plotly==6.9.0",
     "pyarrow==25.0.0",
     "deltalake==1.6.2",
+    "duckdb==1.4.4",
     "redis==8.1.0",
     "aiokafka==0.14.0",
     "prometheus-client==0.26.0",
@@ -68,6 +69,8 @@ ml = [
     "ultralytics==8.4.116",
     "pytorch-lightning==2.6.5",
     "transformers==5.14.1",
+    "rfdetr==1.9.1",
+    "supervision==0.30.0",
 ]
 dev = [
     "pytest==9.1.1",
@@ -77,6 +80,9 @@ dev = [
     "ruff==0.16.2",
     "mypy==2.3.0",
     "locust==2.46.3",
+    "bandit==1.9.4",
+    "pip-audit==2.10.0",
+    "detect-secrets==1.5.0",
 ]
 all = [
     "mineralvision[ml,dev]",
