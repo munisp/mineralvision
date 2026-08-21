@@ -77,28 +77,9 @@ async def _service(*, store=None, production: bool = False) -> tuple[RegulatedTr
     return RegulatedTransferService(TransferManager(client), store or InMemoryTransferControlStore(AUDIT_KEY.encode()), production), client
 
 
-class _BarrierStore(InMemoryTransferControlStore):
-    """Force two test callers past `reserve` together to emulate a lost response retry."""
-
-    def __init__(self) -> None:
-        super().__init__(AUDIT_KEY.encode())
-        self.ready = 0
-        self.release = asyncio.Event()
-
-    async def reserve(self, intent: TransferIntent):
-        receipt = await super().reserve(intent)
-        if receipt is not None:
-            return receipt
-        self.ready += 1
-        if self.ready == 2:
-            self.release.set()
-        await self.release.wait()
-        return None
-
-
 def test_fin_01_concurrent_same_business_key_creates_one_ledger_effect():
     async def scenario() -> None:
-        store = _BarrierStore()
+        store = InMemoryTransferControlStore(AUDIT_KEY.encode())
         service, client = await _service(store=store)
         intent = _intent(key="fin-01-race")
         first, second = await asyncio.gather(

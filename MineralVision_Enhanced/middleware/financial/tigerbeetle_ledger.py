@@ -211,10 +211,51 @@ class MockTigerBeetleClient:
         results = []
         
         for transfer in transfers:
-            # Validate accounts exist
+            # Posting/voiding a pending transfer deliberately uses synthetic zero
+            # account IDs. Resolve the original accounts before generic validation.
+            if transfer.flags & (TransferFlags.POST_PENDING_TRANSFER | TransferFlags.VOID_PENDING_TRANSFER):
+                pending = self._pending_transfers.get(transfer.pending_id)
+                if not pending:
+                    results.append(TransferResult(
+                        transfer_id=transfer.id,
+                        success=False,
+                        error_code="pending_transfer_not_found"
+                    ))
+                    continue
+                debit_account = self._accounts.get(pending.debit_account_id)
+                credit_account = self._accounts.get(pending.credit_account_id)
+                if not debit_account or not credit_account:
+                    results.append(TransferResult(
+                        transfer_id=transfer.id,
+                        success=False,
+                        error_code="pending_transfer_account_not_found"
+                    ))
+                    continue
+                if transfer.flags & TransferFlags.POST_PENDING_TRANSFER:
+                    debit_account.debits_pending -= pending.amount
+                    debit_account.debits_posted += pending.amount
+                    credit_account.credits_pending -= pending.amount
+                    credit_account.credits_posted += pending.amount
+                    # Preserve the economic movement in posted history. The
+                    # synthetic post request carries zero IDs by design, but
+                    # callers must never lose the original account metadata.
+                    transfer.debit_account_id = pending.debit_account_id
+                    transfer.credit_account_id = pending.credit_account_id
+                    transfer.amount = pending.amount
+                    transfer.ledger = pending.ledger
+                    transfer.code = pending.code
+                    transfer.timestamp = self._get_timestamp()
+                    self._transfers[transfer.id] = transfer
+                else:
+                    debit_account.debits_pending -= pending.amount
+                    credit_account.credits_pending -= pending.amount
+                del self._pending_transfers[transfer.pending_id]
+                results.append(TransferResult(transfer_id=transfer.id, success=True))
+                continue
+
+            # Validate accounts for regular and new pending transfers.
             debit_account = self._accounts.get(transfer.debit_account_id)
             credit_account = self._accounts.get(transfer.credit_account_id)
-            
             if not debit_account:
                 results.append(TransferResult(
                     transfer_id=transfer.id,
@@ -222,7 +263,6 @@ class MockTigerBeetleClient:
                     error_code="debit_account_not_found"
                 ))
                 continue
-            
             if not credit_account:
                 results.append(TransferResult(
                     transfer_id=transfer.id,
@@ -230,8 +270,8 @@ class MockTigerBeetleClient:
                     error_code="credit_account_not_found"
                 ))
                 continue
-            
-            # Check if transfer already exists
+
+            # Check if transfer already exists.
             if transfer.id in self._transfers:
                 results.append(TransferResult(
                     transfer_id=transfer.id,
@@ -239,70 +279,14 @@ class MockTigerBeetleClient:
                     error_code="exists"
                 ))
                 continue
-            
-            # Handle pending transfers
+
+            # Handle newly pending transfers.
             if transfer.flags & TransferFlags.PENDING:
                 transfer.timestamp = self._get_timestamp()
                 self._pending_transfers[transfer.id] = transfer
-                
-                # Update pending balances
                 debit_account.debits_pending += transfer.amount
                 credit_account.credits_pending += transfer.amount
-                
-                results.append(TransferResult(
-                    transfer_id=transfer.id,
-                    success=True
-                ))
-                continue
-            
-            # Handle post pending
-            if transfer.flags & TransferFlags.POST_PENDING_TRANSFER:
-                pending = self._pending_transfers.get(transfer.pending_id)
-                if not pending:
-                    results.append(TransferResult(
-                        transfer_id=transfer.id,
-                        success=False,
-                        error_code="pending_transfer_not_found"
-                    ))
-                    continue
-                
-                # Move from pending to posted
-                debit_account.debits_pending -= pending.amount
-                debit_account.debits_posted += pending.amount
-                credit_account.credits_pending -= pending.amount
-                credit_account.credits_posted += pending.amount
-                
-                del self._pending_transfers[transfer.pending_id]
-                transfer.timestamp = self._get_timestamp()
-                self._transfers[transfer.id] = transfer
-                
-                results.append(TransferResult(
-                    transfer_id=transfer.id,
-                    success=True
-                ))
-                continue
-            
-            # Handle void pending
-            if transfer.flags & TransferFlags.VOID_PENDING_TRANSFER:
-                pending = self._pending_transfers.get(transfer.pending_id)
-                if not pending:
-                    results.append(TransferResult(
-                        transfer_id=transfer.id,
-                        success=False,
-                        error_code="pending_transfer_not_found"
-                    ))
-                    continue
-                
-                # Remove pending amounts
-                debit_account.debits_pending -= pending.amount
-                credit_account.credits_pending -= pending.amount
-                
-                del self._pending_transfers[transfer.pending_id]
-                
-                results.append(TransferResult(
-                    transfer_id=transfer.id,
-                    success=True
-                ))
+                results.append(TransferResult(transfer_id=transfer.id, success=True))
                 continue
             
             # Regular transfer
@@ -813,6 +797,7 @@ class InMemoryTransferControlStore(TransferControlStore):
 
     def __init__(self, audit_key: bytes = b"test-only-audit-key"):
         self._receipts: Dict[str, ControlledTransferReceipt] = {}
+        self._reservations: Dict[str, str] = {}
         self._hashes: Dict[str, str] = {}
         self._approvals: Dict[str, List[TransferApproval]] = {}
         self._audit_key = audit_key
@@ -820,10 +805,19 @@ class InMemoryTransferControlStore(TransferControlStore):
 
     async def reserve(self, intent: TransferIntent) -> Optional[ControlledTransferReceipt]:
         async with self._lock:
+            request_hash = intent.payload_hash()
             previous = self._receipts.get(intent.idempotency_key)
-            if previous and previous.request_hash != intent.payload_hash():
-                raise IdempotencyConflict("idempotency key cannot be reused with different transfer input")
-            return previous
+            if previous:
+                if previous.request_hash != request_hash:
+                    raise IdempotencyConflict("idempotency key cannot be reused with different transfer input")
+                return previous
+            reserved_hash = self._reservations.get(intent.idempotency_key)
+            if reserved_hash:
+                if reserved_hash != request_hash:
+                    raise IdempotencyConflict("idempotency key cannot be reused with different transfer input")
+                raise TransferInProgress("matching transfer is in progress or requires reconciliation; retry with the same key")
+            self._reservations[intent.idempotency_key] = request_hash
+            return None
 
     async def record_approvals(self, intent: TransferIntent, approvals: List[TransferApproval]) -> None:
         async with self._lock:
@@ -835,6 +829,7 @@ class InMemoryTransferControlStore(TransferControlStore):
             if previous and previous.request_hash != receipt.request_hash:
                 raise IdempotencyConflict("completion conflicts with original idempotent request")
             self._receipts[receipt.idempotency_key] = receipt
+            self._reservations.pop(receipt.idempotency_key, None)
 
     async def append_audit(self, event_type: str, intent: TransferIntent, actor_id: str, details: Dict[str, Any]) -> str:
         async with self._lock:
