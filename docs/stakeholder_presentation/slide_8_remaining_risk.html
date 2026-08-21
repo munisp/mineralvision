@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .slide-container {
+            width: 1280px;
+            min-height: 720px;
+            background-color: #FFFFFF;
+            position: relative;
+            border: 8px solid #0F172A;
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            grid-template-rows: auto 1fr auto;
+            color: #334155;
+            overflow: hidden;
+        }
+        .header-zone {
+            grid-column: 1 / 7;
+            border-bottom: 8px solid #0F172A;
+            padding-top: 40px;
+            padding-left: 40px;
+            padding-right: 40px;
+            background-color: #FFFFFF;
+            min-height: 120px;
+        }
+        .header-zone h1 {
+            font-weight: 900;
+            font-size: 48px;
+            color: #0F172A;
+            line-height: 1.1;
+            text-transform: uppercase;
+            letter-spacing: -1px;
+        }
+        .content-zone {
+            grid-column: 1 / 7;
+            padding-top: 32px;
+            padding-left: 40px;
+            padding-right: 40px;
+            display: flex;
+            flex-direction: column;
+            background-color: #f8fafc;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 4px solid #0F172A;
+            background-color: #FFFFFF;
+        }
+        th, td {
+            border: 2px solid #0F172A;
+            padding-top: 16px;
+            padding-left: 24px;
+            padding-right: 24px;
+            text-align: left;
+            height: 64px;
+        }
+        th {
+            font-weight: 900;
+            font-size: 24px;
+            color: #FFFFFF;
+            background-color: #0F172A;
+            text-transform: uppercase;
+        }
+        td {
+            font-weight: 400;
+            font-size: 20px;
+            color: #334155;
+        }
+        td.gap-col {
+            font-weight: 900;
+            color: #0F172A;
+            width: 25%;
+        }
+        td.posture-col {
+            font-weight: 900;
+            color: #991B1B;
+            width: 25%;
+        }
+        .footer-zone {
+            grid-column: 1 / 7;
+            border-top: 8px solid #0F172A;
+            padding-top: 20px;
+            padding-left: 40px;
+            padding-right: 40px;
+            display: flex;
+            justify-content: space-between;
+            background-color: #0F172A;
+            color: #FFFFFF;
+            min-height: 64px;
+        }
+        .footer-text {
+            font-weight: 400;
+            font-size: 16px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .accent-square {
+            width: 24px;
+            height: 24px;
+            background-color: #991B1B;
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-container">
+        <div class="header-zone">
+            <h1>Remaining Risk and Release Gates</h1>
+        </div>
+        
+        <div class="content-zone">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Gap</th>
+                        <th>Current Posture</th>
+                        <th>Required Closure Evidence</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="gap-col">Whole-code test coverage</td>
+                        <td class="posture-col">36.46%</td>
+                        <td>Risk-weighted coverage expansion for deployed specialist modules</td>
+                    </tr>
+                    <tr>
+                        <td class="gap-col">Oil-spill/WALDO boundaries</td>
+                        <td class="posture-col">Not at 85% scope target</td>
+                        <td>Artifact, input-fuzz, service-token, timeout, and route-contract test suites</td>
+                    </tr>
+                    <tr>
+                        <td class="gap-col">Real payment operations</td>
+                        <td class="posture-col">Not enabled</td>
+                        <td>Payment-partner, KYC/AML/sanctions, reconciliation, fraud, legal/compliance, HSM/KMS, DR approval</td>
+                    </tr>
+                    <tr>
+                        <td class="gap-col">Environment controls</td>
+                        <td class="posture-col">Code configured, not production-proven</td>
+                        <td>Live Keycloak/OPA/gateway/WAF/SIEM integration and external penetration testing</td>
+                    </tr>
+                    <tr>
+                        <td class="gap-col">CI workflow publication</td>
+                        <td class="posture-col">Workflow files remain permission-blocked</td>
+                        <td>Workflow-authorized token, protected branches, signed artifacts</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="footer-zone">
+            <div class="footer-text">Internal Security Audit Report // Confidential</div>
+            <div class="accent-square"></div>
+        </div>
+    </div>
+</body>
+</html>

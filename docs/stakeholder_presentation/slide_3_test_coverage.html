@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .slide-container {
+            width: 1280px;
+            min-height: 720px; /* keep as required */
+            background-color: #FFFFFF;
+            position: relative;
+            border: 8px solid #0F172A;
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            grid-template-rows: auto 1fr auto;
+            color: #334155;
+            overflow: hidden;
+        }
+        .header-zone {
+            grid-column: 1 / 7;
+            border-bottom: 8px solid #0F172A;
+            /* keep top padding to preserve title spacing, reduce bottom padding to save height */
+            padding: 40px 40px 24px;
+            background-color: #FFFFFF;
+        }
+        .header-zone h1 {
+            font-weight: 900;
+            font-size: 48px;
+            color: #0F172A;
+            line-height: 1.1;
+            text-transform: uppercase;
+            letter-spacing: -1px;
+        }
+        .content-zone {
+            grid-column: 1 / 7;
+            display: grid;
+            grid-template-columns: 4fr 2fr;
+            background-color: #f8fafc;
+        }
+        .image-col {
+            border-right: 8px solid #0F172A;
+            padding: 12px; /* reduced padding to save height */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .image-wrapper {
+            width: 100%;
+            height: 300px; /* reduced from 320px to save more height */
+            border: 4px solid #0F172A;
+            background-color: #FFFFFF;
+            padding: 12px; /* keep small inner padding */
+        }
+        .image-wrapper img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .text-col {
+            padding: 12px; /* reduced padding */
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+        }
+        /* make the list flow into two columns to reduce vertical height */
+        .text-col ul {
+            list-style: none;
+            column-count: 2;
+            column-gap: 24px;
+        }
+        li {
+            font-weight: 400;
+            font-size: 20px;
+            line-height: 1.5;
+            color: #334155;
+            margin-bottom: 12px; /* reduced spacing */
+            padding-left: 18px;
+            position: relative;
+            break-inside: avoid; /* keep items intact across columns */
+        }
+        li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 4px; /* adjusted to match reduced spacing */
+            width: 8px;
+            height: 8px;
+            background-color: #991B1B;
+        }
+        li strong {
+            font-weight: 900;
+            color: #0F172A;
+        }
+        .footer-zone {
+            grid-column: 1 / 7;
+            border-top: 8px solid #0F172A;
+            padding: 12px 40px; /* slightly reduced vertical padding */
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #0F172A;
+            color: #FFFFFF;
+        }
+        .footer-text {
+            font-weight: 400;
+            font-size: 16px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .accent-square {
+            width: 24px;
+            height: 24px;
+            background-color: #991B1B;
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-container">
+        <div class="header-zone">
+            <h1>Test and Coverage Evidence</h1>
+        </div>
+        
+        <div class="content-zone">
+            <div class="image-col">
+                <div class="image-wrapper">
+                    <img src="/home/ubuntu/mineralvision-repo/audit_artifacts/security_coverage_evidence.png" alt="Coverage Evidence Chart" />
+                </div>
+            </div>
+            <div class="text-col">
+                <ul>
+                    <li><strong>Whole-code coverage</strong> rose from 36.22% to 36.46% after 22 additional focused critical tests and two defect fixes.</li>
+                    <li><strong>FIN/AUTH scope</strong> reached 85% under a dedicated coverage configuration: 28 tests passed.</li>
+                    <li><strong>Locked full suite</strong> ran under PostgreSQL/PostGIS with migration, security, operations, and production-readiness validators.</li>
+                    <li><strong>Next quality goals:</strong> extend the same 85% risk-weighted approach to oil-spill, image ingress, WALDO, and project-scoped data paths.</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="footer-zone">
+            <div class="footer-text">Internal Security Audit Report // Confidential</div>
+            <div class="accent-square"></div>
+        </div>
+    </div>
+</body>
+</html>

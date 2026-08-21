@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .slide-container {
+            width: 1280px;
+            min-height: 720px;
+            background-color: #FFFFFF;
+            position: relative;
+            border: 8px solid #0F172A;
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            grid-template-rows: auto 1fr auto;
+            color: #334155;
+            overflow: hidden;
+        }
+        .header-zone {
+            grid-column: 1 / 7;
+            border-bottom: 8px solid #0F172A;
+            padding-top: 40px;
+            padding-left: 40px;
+            padding-right: 40px;
+            background-color: #FFFFFF;
+            min-height: 120px;
+        }
+        .header-zone h1 {
+            font-weight: 900;
+            font-size: 48px;
+            color: #0F172A;
+            line-height: 1.1;
+            text-transform: uppercase;
+            letter-spacing: -1px;
+        }
+        .content-zone {
+            grid-column: 1 / 7;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            background-color: #f8fafc;
+        }
+        .decision-block {
+            border-right: 4px solid #0F172A;
+            border-bottom: 4px solid #0F172A;
+            padding-top: 32px;
+            padding-left: 40px;
+            padding-right: 40px;
+            display: flex;
+            flex-direction: column;
+            background-color: #FFFFFF;
+        }
+        .decision-block:nth-child(even) {
+            border-right: none;
+        }
+        .decision-block:nth-child(3), .decision-block:nth-child(4) {
+            border-bottom: none;
+        }
+        .decision-number {
+            font-weight: 900;
+            font-size: 32px;
+            color: #991B1B;
+            margin-bottom: 16px;
+        }
+        .decision-text {
+            font-weight: 900;
+            font-size: 24px;
+            line-height: 1.4;
+            color: #0F172A;
+        }
+        .decision-subtext {
+            font-weight: 400;
+            font-size: 20px;
+            line-height: 1.5;
+            color: #334155;
+            margin-top: 12px;
+        }
+        .footer-zone {
+            grid-column: 1 / 7;
+            border-top: 8px solid #0F172A;
+            padding-top: 20px;
+            padding-left: 40px;
+            padding-right: 40px;
+            display: flex;
+            justify-content: space-between;
+            background-color: #0F172A;
+            color: #FFFFFF;
+            min-height: 64px;
+        }
+        .footer-text {
+            font-weight: 400;
+            font-size: 16px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .accent-square {
+            width: 24px;
+            height: 24px;
+            background-color: #991B1B;
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-container">
+        <div class="header-zone">
+            <h1>Recommended Stakeholder Decisions</h1>
+        </div>
+        
+        <div class="content-zone">
+            <div class="decision-block">
+                <div class="decision-number">01</div>
+                <div class="decision-text">Maintain Internal-Only Financial Controls</div>
+                <div class="decision-subtext">Keep the financial control layer internal until all real-value enablement gates are independently signed off.</div>
+            </div>
+            <div class="decision-block">
+                <div class="decision-number">02</div>
+                <div class="decision-text">Authorize Next Test Increments</div>
+                <div class="decision-subtext">Approve oil-spill/WALDO ingress and PostgreSQL/project-data integrity tests, each with an 85% critical-subset threshold.</div>
+            </div>
+            <div class="decision-block">
+                <div class="decision-number">03</div>
+                <div class="decision-text">Require Protected CI Workflow</div>
+                <div class="decision-subtext">Enforce locked dependencies, SBOM/dependency scans, full PostgreSQL/PostGIS tests, and signed evidence artifacts.</div>
+            </div>
+            <div class="decision-block">
+                <div class="decision-number">04</div>
+                <div class="decision-text">Fund Independent Security Assessments</div>
+                <div class="decision-subtext">Allocate resources for independent threat modeling, penetration testing, and restore/PITR drills before operational deployment.</div>
+            </div>
+        </div>
+        
+        <div class="footer-zone">
+            <div class="footer-text">Internal Security Audit Report // Confidential</div>
+            <div class="accent-square"></div>
+        </div>
+    </div>
+</body>
+</html>

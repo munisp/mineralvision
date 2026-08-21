@@ -1,0 +1,113 @@
+{
+  "project_info": {
+    "title": "Stakeholder Review: Financial-Control and Security Posture",
+    "created": 1787324278.1,
+    "last_updated": 1787324639.795,
+    "total_slides": 10
+  },
+  "slides": [
+    {
+      "id": "slide_1_stakeholder_review",
+      "state": "edited",
+      "pageNum": 1
+    },
+    {
+      "id": "slide_2_executive_evidence",
+      "state": "edited",
+      "pageNum": 2
+    },
+    {
+      "id": "slide_3_test_coverage",
+      "state": "edited",
+      "pageNum": 3
+    },
+    {
+      "id": "slide_4_financial_model",
+      "state": "edited",
+      "pageNum": 4
+    },
+    {
+      "id": "slide_5_fin_execution",
+      "state": "edited",
+      "pageNum": 5
+    },
+    {
+      "id": "slide_6_auth_boundaries",
+      "state": "edited",
+      "pageNum": 6
+    },
+    {
+      "id": "slide_7_defects_remediated",
+      "state": "edited",
+      "pageNum": 7
+    },
+    {
+      "id": "slide_8_remaining_risk",
+      "state": "edited",
+      "pageNum": 8
+    },
+    {
+      "id": "slide_9_stakeholder_decisions",
+      "state": "edited",
+      "pageNum": 9
+    },
+    {
+      "id": "slide_10_appendices",
+      "state": "edited",
+      "pageNum": 10
+    }
+  ],
+  "outline": [
+    {
+      "id": "slide_1_stakeholder_review",
+      "title": "Stakeholder Review: Financial-Control and Security Posture",
+      "summary": "Evidence from the locked PostgreSQL/PostGIS CI environment on August 21, 2026. Code-level controls only; no real funds accessed. Codebase improved but requires remaining environment gates before production approval."
+    },
+    {
+      "id": "slide_2_executive_evidence",
+      "title": "Executive Evidence Snapshot",
+      "summary": "A tabular snapshot of the full CI suite results, whole-code coverage, focused FIN/AUTH coverage, code-only score, and the disabled status of real-value transfers."
+    },
+    {
+      "id": "slide_3_test_coverage",
+      "title": "Test and Coverage Evidence",
+      "summary": "Visual presentation of the coverage chart showing whole-code baseline, post-fixes coverage, and the 85% critical-path target achievement for FIN/AUTH. Next goals identified.",
+      "image_plan": "/home/ubuntu/mineralvision-repo/audit_artifacts/security_coverage_evidence.png - Primary visual specified in slide content: security_coverage_evidence.png chart"
+    },
+    {
+      "id": "slide_4_financial_model",
+      "title": "Financial-Transfer Hardening Model",
+      "summary": "Overview of the ledger hardening: stable idempotency, replay safety, maker-checker separation, HMAC-SHA-256 audit integrity, and internal-only boundaries."
+    },
+    {
+      "id": "slide_5_fin_execution",
+      "title": "FIN-01 through FIN-06 Execution Evidence",
+      "summary": "A tabular breakdown of the FIN tests and their verified results, including concurrent submission, conflict rejection, MFA approval quorum, and HMAC tampering detection."
+    },
+    {
+      "id": "slide_6_auth_boundaries",
+      "title": "Identity, MFA, and OPA Security Boundaries",
+      "summary": "A tabular breakdown of the AUTH tests and their verified results, including OIDC token verification, explicit MFA claims, tenant isolation, and fail-closed OPA enforcement."
+    },
+    {
+      "id": "slide_7_defects_remediated",
+      "title": "Defects and Technical Debt Remediated",
+      "summary": "Summary of the fixes applied in this pass: pending-transfer post/void processing, metadata preservation, malformed password handling, in-memory control conflict semantics, and branch coverage."
+    },
+    {
+      "id": "slide_8_remaining_risk",
+      "title": "Remaining Risk and Release Gates",
+      "summary": "A tabular view of the current posture and required closure evidence for whole-code coverage, oil-spill/WALDO boundaries, real payment operations, environment controls, and CI workflow publication."
+    },
+    {
+      "id": "slide_9_stakeholder_decisions",
+      "title": "Recommended Stakeholder Decisions",
+      "summary": "Four key recommendations: maintain internal-only financial controls, authorize the next test increments, require a protected CI workflow, and fund independent security assessments."
+    },
+    {
+      "id": "slide_10_appendices",
+      "title": "Appendices and Evidence Locations",
+      "summary": "A list of the exact source file and artifact paths for the tests, scripts, runbooks, CI output, and coverage reports used to compile this presentation."
+    }
+  ]
+}

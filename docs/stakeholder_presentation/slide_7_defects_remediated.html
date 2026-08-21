@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .slide-container {
+            width: 1280px;
+            min-height: 720px;
+            background-color: #FFFFFF;
+            position: relative;
+            border: 8px solid #0F172A;
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            grid-template-rows: auto 1fr auto;
+            color: #334155;
+            overflow: hidden;
+        }
+        .header-zone {
+            grid-column: 1 / 7;
+            border-bottom: 8px solid #0F172A;
+            padding-top: 40px;
+            padding-left: 40px;
+            padding-right: 40px;
+            background-color: #FFFFFF;
+            min-height: 120px;
+        }
+        .header-zone h1 {
+            font-weight: 900;
+            font-size: 48px;
+            color: #0F172A;
+            line-height: 1.1;
+            text-transform: uppercase;
+            letter-spacing: -1px;
+        }
+        .content-zone {
+            grid-column: 1 / 7;
+            display: flex;
+            flex-direction: column;
+            background-color: #f8fafc;
+        }
+        .defect-row {
+            display: grid;
+            grid-template-columns: 2fr 4fr;
+            border-bottom: 4px solid #0F172A;
+            flex: 1;
+        }
+        .defect-row:last-child {
+            border-bottom: none;
+        }
+        .defect-title {
+            padding-top: 32px;
+            padding-left: 40px;
+            padding-right: 24px;
+            font-weight: 900;
+            font-size: 22px;
+            color: #991B1B;
+            text-transform: uppercase;
+            border-right: 4px solid #0F172A;
+        }
+        .defect-desc {
+            padding-top: 32px;
+            padding-left: 32px;
+            padding-right: 40px;
+            font-weight: 400;
+            font-size: 20px;
+            color: #334155;
+            line-height: 1.5;
+        }
+        .footer-zone {
+            grid-column: 1 / 7;
+            border-top: 8px solid #0F172A;
+            padding-top: 20px;
+            padding-left: 40px;
+            padding-right: 40px;
+            display: flex;
+            justify-content: space-between;
+            background-color: #0F172A;
+            color: #FFFFFF;
+            min-height: 64px;
+        }
+        .footer-text {
+            font-weight: 400;
+            font-size: 16px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .accent-square {
+            width: 24px;
+            height: 24px;
+            background-color: #991B1B;
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-container">
+        <div class="header-zone">
+            <h1>Defects and Technical Debt Remediated</h1>
+        </div>
+        
+        <div class="content-zone">
+            <div class="defect-row">
+                <div class="defect-title">Pending-Transfer Processing</div>
+                <div class="defect-desc">Corrected post/void processing, which previously rejected synthetic zero account IDs before resolving the original pending transfer.</div>
+            </div>
+            <div class="defect-row">
+                <div class="defect-title">Metadata Preservation</div>
+                <div class="defect-desc">Preserved underlying account, amount, ledger, and code metadata for posted pending-transfer history.</div>
+            </div>
+            <div class="defect-row">
+                <div class="defect-title">Malformed Password Handling</div>
+                <div class="defect-desc">Hardened credential verification so non-string input fails closed rather than raising an unhandled exception.</div>
+            </div>
+            <div class="defect-row">
+                <div class="defect-title">In-Memory Control Semantics</div>
+                <div class="defect-desc">Made the in-memory control store reserve idempotency keys before completion, matching durable-store conflict semantics.</div>
+            </div>
+            <div class="defect-row">
+                <div class="defect-title">Critical Branch Coverage</div>
+                <div class="defect-desc">Added FIN/AUTH branch coverage for account constraints, missing accounts, local token lifecycle, OIDC configuration, OPA HTTP responses, and fail-closed policy behavior.</div>
+            </div>
+        </div>
+        
+        <div class="footer-zone">
+            <div class="footer-text">Internal Security Audit Report // Confidential</div>
+            <div class="accent-square"></div>
+        </div>
+    </div>
+</body>
+</html>

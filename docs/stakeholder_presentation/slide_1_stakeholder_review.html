@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;900&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .slide-container {
+            width: 1280px;
+            min-height: 720px; /* must remain */
+            background-color: #FFFFFF;
+            position: relative;
+            border: 8px solid #0F172A;
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            grid-template-rows: auto 1fr auto;
+            color: #334155;
+            overflow: hidden;
+        }
+        .header-zone {
+            grid-column: 1 / 7;
+            border-bottom: 8px solid #0F172A;
+            /* Keep upper/title top padding intact (60px) per constraints. */
+            padding: 60px 40px 24px 40px; /* reduce bottom padding only */
+            background-color: #FFFFFF;
+        }
+        .header-zone h1 {
+            font-weight: 900;
+            font-size: 64px;
+            color: #0F172A;
+            line-height: 1.1;
+            text-transform: uppercase;
+            letter-spacing: -1px;
+            max-width: 1000px;
+        }
+        .content-zone {
+            grid-column: 1 / 7;
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
+            height: 100%;
+        }
+        .left-col {
+            grid-column: 1 / 4;
+            border-right: 8px solid #0F172A;
+            padding: 24px; /* reduced from 40 */
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+        }
+        .right-col {
+            grid-column: 4 / 7;
+            padding: 24px; /* reduced from 40 */
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start; /* avoid extra vertical centering space */
+            background-color: #f8fafc;
+        }
+        .subtitle {
+            font-weight: 900;
+            font-size: 32px;
+            color: #991B1B;
+            margin-bottom: 24px;
+            text-transform: uppercase;
+        }
+        .meta-text {
+            font-weight: 400;
+            font-size: 24px;
+            line-height: 1.5;
+            color: #334155;
+            margin-bottom: 24px; /* reduced spacing */
+        }
+        .decision-block {
+            border: 8px solid #991B1B;
+            padding: 16px; /* reduced from 32 */
+            background-color: #FFFFFF;
+            position: relative;
+        }
+        .decision-label {
+            position: absolute;
+            top: -16px;
+            left: 24px;
+            background-color: #FFFFFF;
+            padding: 0 16px;
+            font-weight: 900;
+            font-size: 18px;
+            color: #991B1B;
+            text-transform: uppercase;
+        }
+        .decision-text {
+            font-weight: 900;
+            font-size: 28px;
+            line-height: 1.4;
+            color: #0F172A;
+        }
+        .footer-zone {
+            grid-column: 1 / 7;
+            border-top: 8px solid #0F172A;
+            padding: 20px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #0F172A;
+            color: #FFFFFF;
+        }
+        .footer-text {
+            font-weight: 400;
+            font-size: 16px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .accent-square {
+            width: 24px;
+            height: 24px;
+            background-color: #991B1B;
+        }
+    </style>
+</head>
+<body>
+    <div class="slide-container">
+        <div class="header-zone">
+            <h1>MineralVision Financial Transfer Hardening &amp; Security Posture</h1>
+        </div>
+        
+        <div class="content-zone">
+            <div class="left-col">
+                <div class="subtitle">Stakeholder Review</div>
+                <div class="meta-text">
+                    <strong>EVIDENCE FROM:</strong><br>
+                    Locked PostgreSQL/PostGIS CI Environment<br>
+                    August 21, 2026
+                </div>
+                <!-- Scope limitation content trimmed to reduce height while keeping key notice -->
+            </div>
+            
+            <div class="right-col">
+                <div class="decision-block">
+                    <div class="decision-label">Release Decision Statement</div>
+                    <div class="decision-text">
+                        The codebase has materially improved but should not be represented as defect-free or mission-critical production approved.
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer-zone">
+            <div class="footer-text">Internal Security Audit Report // Confidential</div>
+            <div class="accent-square"></div>
+        </div>
+    </div>
+</body>
+</html>
