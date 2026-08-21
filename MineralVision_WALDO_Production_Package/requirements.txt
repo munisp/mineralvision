@@ -24,7 +24,7 @@ opencv-python-headless==5.0.0.93
 
 # Model export / edge runtimes (optional backends are imported lazily)
 onnx==1.22.0
-onnxruntime==1.23.2
+onnxruntime==1.28.0
 
 # Persistence & ops
 psycopg2-binary==2.9.12
