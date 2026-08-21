@@ -449,6 +449,16 @@ class AccountManager:
         return await self.client.get_account_transfers(account_id, limit)
 
 
+def _validate_transfer_request(debit_account_id: int, credit_account_id: int, amount: int) -> None:
+    """Reject malformed value transfers before a ledger client observes them."""
+    if not isinstance(amount, int) or isinstance(amount, bool) or amount <= 0:
+        raise ValueError("transfer amount must be a positive integer in minor units")
+    if debit_account_id <= 0 or credit_account_id <= 0:
+        raise ValueError("transfer account IDs must be positive")
+    if debit_account_id == credit_account_id:
+        raise ValueError("debit and credit accounts must differ")
+
+
 class TransferManager:
     """
     Transfer management for TigerBeetle.
@@ -472,7 +482,8 @@ class TransferManager:
     async def transfer(self, debit_account_id: int, credit_account_id: int,
                       amount: int, ledger: int = 1, code: int = 0,
                       user_data: int = 0) -> TransferResult:
-        """Execute a transfer."""
+        """Execute a validated transfer."""
+        _validate_transfer_request(debit_account_id, credit_account_id, amount)
         transfer = Transfer(
             id=self._generate_id(),
             debit_account_id=debit_account_id,
@@ -488,7 +499,8 @@ class TransferManager:
     
     async def create_pending(self, debit_account_id: int, credit_account_id: int,
                             amount: int, ledger: int = 1, code: int = 0) -> TransferResult:
-        """Create a pending transfer."""
+        """Create a validated pending transfer."""
+        _validate_transfer_request(debit_account_id, credit_account_id, amount)
         transfer = Transfer(
             id=self._generate_id(),
             debit_account_id=debit_account_id,
@@ -539,6 +551,7 @@ class TransferManager:
         transfer_objects = []
         
         for t in transfers:
+            _validate_transfer_request(t['debit_account_id'], t['credit_account_id'], t['amount'])
             transfer_objects.append(Transfer(
                 id=self._generate_id(),
                 debit_account_id=t['debit_account_id'],

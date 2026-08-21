@@ -15,6 +15,8 @@ import json
 from sqlalchemy.orm import Session
 
 from ..database import get_db, DrillholeModel, ProjectModel, SampleModel
+from ..auth_middleware import TokenPayload, require_auth
+from ..authz import is_admin, require_project_access
 
 # Import the drillhole database module
 from ..geology.drillhole_database import (
@@ -119,10 +121,12 @@ def _register_collar(d: DrillholeModel):
     drillhole_database.add_collar(collar)
 
 
-def _get_or_404(drillhole_id: str, db: Session) -> DrillholeModel:
+def _get_or_404(drillhole_id: str, db: Session, user: TokenPayload) -> DrillholeModel:
+    """Load a drillhole only after checking its parent project boundary."""
     drillhole = db.query(DrillholeModel).filter(DrillholeModel.id == drillhole_id).first()
     if not drillhole:
         raise HTTPException(status_code=404, detail=f"Drillhole {drillhole_id} not found")
+    require_project_access(db, drillhole.project_id, user)
     return drillhole
 
 
@@ -132,10 +136,13 @@ async def list_drillholes(
     status: Optional[str] = Query(None, description="Filter by status"),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: TokenPayload = Depends(require_auth)
 ):
-    """List all drillholes with optional filtering."""
-    query = db.query(DrillholeModel)
+    """List only drillholes in projects accessible to the caller."""
+    query = db.query(DrillholeModel).join(ProjectModel, DrillholeModel.project_id == ProjectModel.id)
+    if not is_admin(user):
+        query = query.filter(ProjectModel.owner_id == user.user_id)
     if projectId:
         query = query.filter(DrillholeModel.project_id == projectId)
     if status:
@@ -145,18 +152,23 @@ async def list_drillholes(
 
 
 @router.get("/{drillhole_id}", response_model=Drillhole)
-async def get_drillhole(drillhole_id: str, db: Session = Depends(get_db)):
-    """Get a specific drillhole by ID."""
-    return _to_response(_get_or_404(drillhole_id, db))
+async def get_drillhole(
+    drillhole_id: str,
+    db: Session = Depends(get_db),
+    user: TokenPayload = Depends(require_auth)
+):
+    """Get a drillhole only when its parent project is accessible."""
+    return _to_response(_get_or_404(drillhole_id, db, user))
 
 
 @router.post("", response_model=Drillhole, status_code=201)
-async def create_drillhole(drillhole: DrillholeCreate, db: Session = Depends(get_db)):
-    """Create a new drillhole."""
-    # Verify project exists
-    project = db.query(ProjectModel).filter(ProjectModel.id == drillhole.projectId).first()
-    if not project:
-        raise HTTPException(status_code=404, detail=f"Project {drillhole.projectId} not found")
+async def create_drillhole(
+    drillhole: DrillholeCreate,
+    db: Session = Depends(get_db),
+    user: TokenPayload = Depends(require_auth)
+):
+    """Create a drillhole only inside a project owned by the caller or an admin."""
+    require_project_access(db, drillhole.projectId, user)
 
     db_drillhole = DrillholeModel(
         id=str(uuid.uuid4()),
@@ -187,10 +199,11 @@ async def create_drillhole(drillhole: DrillholeCreate, db: Session = Depends(get
 async def update_drillhole(
     drillhole_id: str,
     drillhole: DrillholeUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: TokenPayload = Depends(require_auth)
 ):
-    """Update an existing drillhole."""
-    db_drillhole = _get_or_404(drillhole_id, db)
+    """Update a drillhole only when its project is accessible."""
+    db_drillhole = _get_or_404(drillhole_id, db, user)
 
     update_data = drillhole.model_dump(exclude_unset=True)
     if update_data.get("holeId"):
@@ -215,9 +228,13 @@ async def update_drillhole(
 
 
 @router.delete("/{drillhole_id}", status_code=204)
-async def delete_drillhole(drillhole_id: str, db: Session = Depends(get_db)):
-    """Delete a drillhole."""
-    db_drillhole = _get_or_404(drillhole_id, db)
+async def delete_drillhole(
+    drillhole_id: str,
+    db: Session = Depends(get_db),
+    user: TokenPayload = Depends(require_auth)
+):
+    """Delete a drillhole only when its project is accessible."""
+    db_drillhole = _get_or_404(drillhole_id, db, user)
     db.delete(db_drillhole)
     db.commit()
     return None
@@ -227,13 +244,11 @@ async def delete_drillhole(drillhole_id: str, db: Session = Depends(get_db)):
 async def upload_drillholes(
     file: UploadFile = File(...),
     projectId: str = Form(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: TokenPayload = Depends(require_auth)
 ):
-    """Upload drillhole data from CSV/Excel file."""
-    # Verify project exists
-    project = db.query(ProjectModel).filter(ProjectModel.id == projectId).first()
-    if not project:
-        raise HTTPException(status_code=404, detail=f"Project {projectId} not found")
+    """Upload drillhole data only into a project accessible to the caller."""
+    require_project_access(db, projectId, user)
 
     try:
         content = await file.read()
@@ -296,10 +311,11 @@ async def upload_drillholes(
 async def composite_drillhole(
     drillhole_id: str,
     request: CompositeRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: TokenPayload = Depends(require_auth)
 ):
-    """Create composites for a drillhole."""
-    drillhole = _get_or_404(drillhole_id, db)
+    """Create composites only for an accessible drillhole."""
+    drillhole = _get_or_404(drillhole_id, db, user)
 
     try:
         composites = drillhole_database.composite_hole(
@@ -329,10 +345,11 @@ async def composite_drillhole(
 async def desurvey_drillhole(
     drillhole_id: str,
     request: DesurveyRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: TokenPayload = Depends(require_auth)
 ):
-    """Calculate desurveyed coordinates for a drillhole."""
-    drillhole = _get_or_404(drillhole_id, db)
+    """Calculate coordinates only for an accessible drillhole."""
+    drillhole = _get_or_404(drillhole_id, db, user)
 
     try:
         desurveyed = drillhole_database.desurvey_hole(hole_id=drillhole.hole_id)
@@ -358,9 +375,13 @@ async def desurvey_drillhole(
 
 
 @router.get("/{drillhole_id}/assays")
-async def get_drillhole_assays(drillhole_id: str, db: Session = Depends(get_db)):
-    """Get assay data for a drillhole."""
-    drillhole = _get_or_404(drillhole_id, db)
+async def get_drillhole_assays(
+    drillhole_id: str,
+    db: Session = Depends(get_db),
+    user: TokenPayload = Depends(require_auth)
+):
+    """Get assay data only for an accessible drillhole."""
+    drillhole = _get_or_404(drillhole_id, db, user)
 
     samples = db.query(SampleModel).filter(
         SampleModel.drillhole_id == drillhole.id
@@ -384,9 +405,13 @@ async def get_drillhole_assays(drillhole_id: str, db: Session = Depends(get_db))
 
 
 @router.get("/{drillhole_id}/lithology")
-async def get_drillhole_lithology(drillhole_id: str, db: Session = Depends(get_db)):
-    """Get lithology data for a drillhole."""
-    drillhole = _get_or_404(drillhole_id, db)
+async def get_drillhole_lithology(
+    drillhole_id: str,
+    db: Session = Depends(get_db),
+    user: TokenPayload = Depends(require_auth)
+):
+    """Get lithology data only for an accessible drillhole."""
+    drillhole = _get_or_404(drillhole_id, db, user)
 
     samples = db.query(SampleModel).filter(
         SampleModel.drillhole_id == drillhole.id,

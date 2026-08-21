@@ -32,14 +32,22 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Optional SAM3 imports with graceful fallback
+# Optional runtime imports.  Pillow image decoding is independent of PyTorch
+# availability; grouping them masked genuine backend failures with NameError.
 try:
     import torch
-    from PIL import Image
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
     logger.warning("PyTorch not available. SAM3 features disabled.")
+
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    Image = None
+    logger.warning("Pillow not available. Path-based SAM3 image loading is disabled.")
 
 try:
     from sam3 import SAM3Predictor, SAM3VideoPredictor
@@ -721,7 +729,9 @@ class SAM3Segmenter:
         if not SAM3_AVAILABLE or self.predictor is None:
             return
         try:
-            adapter_state = torch.load(adapter_path, map_location=self.device)
+            # Adapter artifacts must contain tensor weights only; arbitrary pickle
+            # objects are rejected to prevent code execution through checkpoints.
+            adapter_state = torch.load(adapter_path, map_location=self.device, weights_only=True)
             self.predictor.load_adapter(adapter_state)
             logger.info(f"Loaded adapter from {adapter_path}")
         except Exception as e:
@@ -761,6 +771,8 @@ class SAM3Segmenter:
 
         # Real-inference exceptions propagate to the caller (API -> 500).
         if isinstance(image, (str, Path)):
+            if not PIL_AVAILABLE:
+                raise SAM3UnavailableError("path-based image decoding (Pillow unavailable)")
             image = np.array(Image.open(image))
 
         self.predictor.set_image(image)
@@ -811,6 +823,8 @@ class SAM3Segmenter:
 
         # Real-inference exceptions propagate to the caller (API -> 500).
         if isinstance(image, (str, Path)):
+            if not PIL_AVAILABLE:
+                raise SAM3UnavailableError("path-based image decoding (Pillow unavailable)")
             image = np.array(Image.open(image))
         if isinstance(exemplar_image, (str, Path)):
             exemplar_image = np.array(Image.open(exemplar_image))
@@ -857,6 +871,8 @@ class SAM3Segmenter:
 
         # Real-inference exceptions propagate to the caller (API -> 500).
         if isinstance(image, (str, Path)):
+            if not PIL_AVAILABLE:
+                raise SAM3UnavailableError("path-based image decoding (Pillow unavailable)")
             image = np.array(Image.open(image))
 
         self.predictor.set_image(image)

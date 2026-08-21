@@ -109,6 +109,7 @@ services:
       OPA_URL: ${OPA_URL}
       OPA_FAIL_CLOSED: ${OPA_FAIL_CLOSED}
       WALDO_SERVICE_URL: http://waldo:8000
+      WALDO_API_TOKEN: ${WALDO_API_TOKEN}
     expose: ["8000"]
     networks: [application, data]
     depends_on:
@@ -139,6 +140,10 @@ services:
       PORT: "8000"
       MODEL_PRECISION: ${MODEL_PRECISION:-fp16}
       BATCH_SIZE: ${BATCH_SIZE:-4}
+      ENV: ${ENV}
+      WALDO_API_TOKEN: ${WALDO_API_TOKEN}
+      WALDO_MAX_UPLOAD_BYTES: ${WALDO_MAX_UPLOAD_BYTES:-26214400}
+      WALDO_MAX_IMAGE_PIXELS: ${WALDO_MAX_IMAGE_PIXELS:-40000000}
       DATABASE_URI: postgresql+psycopg2://mineralvision_app:${POSTGRES_APP_PASSWORD}@postgres:5432/mineralvision
     expose: ["8000"]
     volumes:

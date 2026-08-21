@@ -203,8 +203,15 @@ class PostGISConnection:
             
             logger.info("Connected to PostgreSQL database")
             
-        except ImportError:
-            logger.warning("psycopg2 not available, using SQLite fallback")
+        except ImportError as exc:
+            allow_fallback = os.environ.get("WALDO_ALLOW_SQLITE_FALLBACK", "").lower() == "true"
+            environment = os.environ.get("ENV", os.environ.get("ENVIRONMENT", "development")).lower()
+            if environment == "production" or not allow_fallback:
+                raise RuntimeError(
+                    "PostgreSQL/PostGIS driver is required; SQLite fallback is disabled unless "
+                    "WALDO_ALLOW_SQLITE_FALLBACK=true in a non-production environment"
+                ) from exc
+            logger.warning("WALDO development-only SQLite fallback explicitly enabled")
             self._use_sqlite_fallback()
     
     def _use_sqlite_fallback(self):
@@ -824,6 +831,9 @@ class GeoPersistenceManager:
         Returns:
             List of count records
         """
+        allowed_groupings = {"class_name", "source_id"}
+        if group_by not in allowed_groupings:
+            raise ValueError(f"group_by must be one of {sorted(allowed_groupings)}")
         is_postgres = 'postgresql' in str(self.connection.connection_string).lower()
         
         if is_postgres:

@@ -41,6 +41,18 @@ try:
 except ImportError:
     TORCH_AVAILABLE = False
 
+    class _TorchUnavailableModule:
+        """Import-safe base class that fails loudly on unavailable training use."""
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("PyTorch is required for SAM3 fine-tuning")
+
+    class _TorchUnavailableNN:
+        Module = _TorchUnavailableModule
+
+    nn = _TorchUnavailableNN()
+    Dataset = object
+    DataLoader = object
+
 try:
     from PIL import Image
     PIL_AVAILABLE = True
@@ -626,7 +638,8 @@ class SAM3FineTuner:
             
             # Load LoRA weights
             if TORCH_AVAILABLE and (path / "lora_weights.pt").exists():
-                lora_state = torch.load(path / "lora_weights.pt")
+                # Checkpoints are tensor weights only; never unpickle executable objects.
+                lora_state = torch.load(path / "lora_weights.pt", weights_only=True)
                 for name, state in lora_state.items():
                     if name in self.lora_layers:
                         self.lora_layers[name].load_state_dict(state)

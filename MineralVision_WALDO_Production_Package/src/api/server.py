@@ -5,20 +5,34 @@ API Server Module for MineralVision WALDO Integration
 This module provides the RESTful API endpoints for the WALDO integration.
 """
 
-import os
-import time
+import base64
+import ipaddress
 import json
 import logging
+import os
+import secrets
+import tempfile
+import threading
+import time
+import uuid
+from pathlib import Path
+from urllib.parse import urlparse
 import numpy as np
 from flask import Flask, request, jsonify, send_file
-from flask_cors import CORS
 from werkzeug.utils import secure_filename
 
 from waldo_integration import WALDOIntegrationModule
 
-# Initialize Flask app
+# WALDO is a private service-to-service API. It deliberately does not enable
+# browser CORS. Public browser requests must enter through the authenticated
+# MineralVision API and its edge gateway.
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("WALDO_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+MAX_IMAGE_PIXELS = int(os.environ.get("WALDO_MAX_IMAGE_PIXELS", str(40_000_000)))
+WALDO_ENV = os.environ.get("ENV", os.environ.get("ENVIRONMENT", "development")).lower()
+WALDO_API_TOKEN = os.environ.get("WALDO_API_TOKEN", "")
+if WALDO_ENV == "production" and not WALDO_API_TOKEN:
+    raise RuntimeError("WALDO_API_TOKEN is required when ENV=production")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -39,8 +53,10 @@ def load_config(config_path):
             with open(config_path, 'r') as f:
                 return json.load(f)
     except Exception as e:
-        logger.error(f"Failed to load configuration: {str(e)}")
-        # Return default configuration
+        logger.error("Failed to load WALDO configuration")
+        if WALDO_ENV == "production":
+            raise RuntimeError("WALDO configuration is required in production") from e
+        # Development-only fallback; production must use the configured Postgres-backed service.
         return {
             'models_dir': os.environ.get('MODELS_DIR', './models'),
             'model_name': os.environ.get('MODEL_NAME', 'waldo_v3.pt'),
@@ -48,8 +64,8 @@ def load_config(config_path):
             'device': os.environ.get('DEVICE', 'cuda'),
             'precision': os.environ.get('PRECISION', 'fp16'),
             'database': {
-                'type': 'sqlite',
-                'path': os.environ.get('DATABASE_PATH', ':memory:')
+                'type': 'postgresql',
+                'uri': os.environ.get('DATABASE_URI', '')
             },
             'tracker_max_age': int(os.environ.get('TRACKER_MAX_AGE', '10')),
             'tracker_min_hits': int(os.environ.get('TRACKER_MIN_HITS', '3')),
@@ -93,6 +109,55 @@ def _detections_to_proxy_shape(detections, max_detections=None):
         })
     return out
 
+def _service_authorized() -> bool:
+    """Validate the private service token without logging caller credentials."""
+    return bool(WALDO_API_TOKEN) and secrets.compare_digest(
+        request.headers.get("X-Waldo-Service-Token", ""), WALDO_API_TOKEN
+    )
+
+
+@app.before_request
+def require_service_authentication():
+    """Protect every operational route; only the minimal health probe is public."""
+    if request.path == "/health":
+        return None
+    if not _service_authorized():
+        return jsonify({"error": "service authentication required"}), 401
+    return None
+
+
+@app.errorhandler(413)
+def request_too_large(_error):
+    return jsonify({"error": "upload exceeds configured size limit"}), 413
+
+
+@app.errorhandler(Exception)
+def unexpected_error(error):
+    logger.exception("Unhandled WALDO API error")
+    return jsonify({"error": "internal server error"}), 500
+
+
+def _validated_confidence(value):
+    if value is None or value == "":
+        return None
+    confidence = float(value)
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError("confidence_threshold must be between 0 and 1")
+    return confidence
+
+
+def _decode_image_bytes(data: bytes):
+    import cv2
+    if not data:
+        raise ValueError("image payload is empty")
+    image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("failed to decode image")
+    if image.shape[0] * image.shape[1] > MAX_IMAGE_PIXELS:
+        raise ValueError("image exceeds configured pixel limit")
+    return image
+
+
 # API Routes
 
 @app.route('/health', methods=['GET'])
@@ -114,67 +179,24 @@ def get_status():
 
 @app.route('/api/detection/image', methods=['POST'])
 def process_image():
-    """Process a single image for object detection."""
+    """Process one authenticated image request entirely in memory."""
     try:
-        # Check if image is provided
-        if 'image' not in request.files:
-            return jsonify({'error': 'No image provided'}), 400
-        
-        file = request.files['image']
-        if file.filename == '':
-            return jsonify({'error': 'No image selected'}), 400
-        
-        # Get parameters
-        confidence_threshold = request.form.get('confidence_threshold', None)
-        if confidence_threshold:
-            confidence_threshold = float(confidence_threshold)
-        
-        classes = request.form.get('classes', None)
-        if classes:
-            classes = json.loads(classes)
-        
-        # Save image temporarily
-        filename = secure_filename(file.filename)
-        temp_path = os.path.join('/tmp', filename)
-        file.save(temp_path)
-        
-        # Read image
-        import cv2
-        image = cv2.imread(temp_path)
-        if image is None:
-            return jsonify({'error': 'Failed to read image'}), 400
-        
-        # Process image
-        metadata = {
-            'source': filename,
-            'timestamp': time.time()
-        }
-        
-        # Override confidence threshold if provided
-        module = get_waldo_module()
-        if confidence_threshold:
-            original_threshold = module.detector.confidence_threshold
-            module.detector.confidence_threshold = confidence_threshold
-
-        result = module.process_frame(image, metadata)
-
-        # Restore original threshold
-        if confidence_threshold:
-            module.detector.confidence_threshold = original_threshold
-        
-        # Clean up
-        os.remove(temp_path)
-        
-        # Return results
+        file = request.files.get("image")
+        if file is None or not file.filename:
+            return jsonify({"error": "image is required"}), 400
+        image = _decode_image_bytes(file.read())
+        confidence_threshold = _validated_confidence(request.form.get("confidence_threshold"))
+        classes = _parse_classes(request.form.get("classes"))
+        response = _run_detection(
+            image, secure_filename(file.filename), confidence_threshold, classes, 1000
+        )
         return jsonify({
-            'request_id': f"req_{int(time.time())}",
-            'detections': result['detections'],
-            'processing_time': result['processing_time']
+            "request_id": f"req_{uuid.uuid4().hex}",
+            "detections": response["detections"],
+            "processing_time": response["processing_time_ms"] / 1000.0,
         })
-    
-    except Exception as e:
-        logger.error(f"Error processing image: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    except (ValueError, TypeError, base64.binascii.Error):
+        return jsonify({"error": "invalid image request"}), 400
 
 
 def _parse_classes(value):
@@ -189,265 +211,167 @@ def _parse_classes(value):
     return [c.strip() for c in value.split(',') if c.strip()]
 
 
-@app.route('/detect', methods=['POST'])
-def detect_multipart():
-    """MineralVision waldo_proxy-compatible detection endpoint (multipart).
+_DETECTOR_LOCK = threading.Lock()
 
-    Accepts the proxy's payload: files={'image': (filename, bytes)},
-    form fields confidence_threshold, max_detections, classes (comma-joined).
-    Responds with the proxy's DetectionResult shape.
-    """
-    try:
-        if 'image' not in request.files:
-            return jsonify({'error': 'No image provided'}), 400
-        file = request.files['image']
-        if file.filename == '':
-            return jsonify({'error': 'No image selected'}), 400
 
-        confidence_threshold = request.form.get('confidence_threshold', None)
-        if confidence_threshold:
-            confidence_threshold = float(confidence_threshold)
-        max_detections = int(request.form.get('max_detections', 100))
-        classes = _parse_classes(request.form.get('classes', None))
+def _decode_json_image(payload):
+    """Decode the exact bounded ndarray contract used by the internal API client."""
+    encoded = payload.get("image")
+    shape = payload.get("shape")
+    if not isinstance(encoded, str) or not isinstance(shape, list) or len(shape) not in {2, 3}:
+        raise ValueError("JSON detection requires base64 image bytes and a 2D or 3D shape")
+    if payload.get("dtype") != "uint8" or not all(isinstance(dimension, int) and dimension > 0 for dimension in shape):
+        raise ValueError("only a positive uint8 image array is accepted")
+    expected_size = int(np.prod(shape))
+    if expected_size > MAX_IMAGE_PIXELS * 3:
+        raise ValueError("image exceeds configured pixel limit")
+    raw = base64.b64decode(encoded, validate=True)
+    if len(raw) != expected_size:
+        raise ValueError("image byte length does not match declared shape")
+    return np.frombuffer(raw, dtype=np.uint8).reshape(tuple(shape))
 
-        import cv2
-        file_bytes = np.frombuffer(file.read(), np.uint8)
-        image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
-        if image is None:
-            return jsonify({'error': 'Failed to decode image'}), 400
 
-        module = get_waldo_module()
-        if confidence_threshold:
-            original_threshold = module.detector.confidence_threshold
-            module.detector.confidence_threshold = confidence_threshold
-        result = module.process_frame(
-            image, {'source': file.filename, 'timestamp': time.time(),
-                    'classes': classes})
-        if confidence_threshold:
+def _run_detection(image, source, confidence_threshold, classes, max_detections):
+    """Run one detector request without leaking threshold changes between callers."""
+    module = get_waldo_module()
+    with _DETECTOR_LOCK:
+        original_threshold = module.detector.confidence_threshold
+        try:
+            if confidence_threshold is not None:
+                module.detector.confidence_threshold = confidence_threshold
+            result = module.process_frame(image, {"source": source, "timestamp": time.time(), "classes": classes})
+        finally:
             module.detector.confidence_threshold = original_threshold
+    detections = result["detections"]
+    if classes:
+        detections = [detection for detection in detections if detection.get("class_name") in classes]
+    return {
+        "image_id": f"img_{uuid.uuid4().hex}",
+        "detections": _detections_to_proxy_shape(detections, max_detections),
+        "processing_time_ms": result["processing_time"] * 1000.0,
+        "model_version": getattr(module, "model_name", None) or module.config.get("model_name", "waldo"),
+    }
 
-        detections = result['detections']
-        if classes:
-            detections = [d for d in detections
-                          if d.get('class_name') in classes]
 
-        return jsonify({
-            'image_id': f"img_{int(time.time() * 1000)}",
-            'detections': _detections_to_proxy_shape(detections, max_detections),
-            'processing_time_ms': result['processing_time'] * 1000.0,
-            'model_version': getattr(module, 'model_name', None)
-                             or module.config.get('model_name', 'waldo'),
-        })
-    except Exception as e:
-        logger.error(f"Error in /detect: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+@app.route('/detect', methods=['POST'])
+def detect():
+    """Run bounded private detection for the internal JSON or multipart contract."""
+    try:
+        if request.is_json:
+            payload = request.get_json(force=False, silent=False) or {}
+            image = _decode_json_image(payload)
+            source = "internal-ndarray"
+            confidence_threshold = _validated_confidence(payload.get("confidence_threshold"))
+            classes = _parse_classes(payload.get("classes"))
+            max_detections = int(payload.get("max_detections", 100))
+        else:
+            file = request.files.get("image")
+            if file is None or not file.filename:
+                return jsonify({"error": "image is required"}), 400
+            image = _decode_image_bytes(file.read())
+            source = secure_filename(file.filename)
+            confidence_threshold = _validated_confidence(request.form.get("confidence_threshold"))
+            classes = _parse_classes(request.form.get("classes"))
+            max_detections = int(request.form.get("max_detections", 100))
+        if not 1 <= max_detections <= 1000:
+            return jsonify({"error": "max_detections must be between 1 and 1000"}), 400
+        return jsonify(_run_detection(image, source, confidence_threshold, classes, max_detections))
+    except (ValueError, TypeError, base64.binascii.Error):
+        return jsonify({"error": "invalid detection request"}), 400
 
 
 @app.route('/detect/url', methods=['POST'])
 def detect_from_url():
-    """MineralVision waldo_proxy-compatible detection endpoint (JSON body).
+    """Deliberately disabled: server-side URL retrieval is an SSRF risk."""
+    return jsonify({"error": "remote URL ingestion is disabled; upload image bytes through /detect"}), 404
 
-    Accepts {'image_url', 'confidence_threshold', 'max_detections',
-    'classes' (list)} and responds with the proxy's DetectionResult shape.
-    """
-    try:
-        payload = request.get_json(force=True)
-        image_url = payload.get('image_url')
-        if not image_url:
-            return jsonify({'error': 'image_url is required'}), 400
-        confidence_threshold = payload.get('confidence_threshold')
-        max_detections = int(payload.get('max_detections', 100))
-        classes = _parse_classes(payload.get('classes'))
+WALDO_ENABLE_ASYNC_VIDEO = os.environ.get("WALDO_ENABLE_ASYNC_VIDEO", "").lower() == "true"
+VIDEO_JOB_ROOT = Path(os.environ.get("WALDO_JOB_ROOT", "/var/lib/waldo/jobs"))
+_VIDEO_JOBS: dict[str, dict] = {}
+_VIDEO_JOB_LOCK = threading.Lock()
 
-        import cv2
-        import urllib.request
-        with urllib.request.urlopen(image_url, timeout=30) as resp:
-            data = resp.read()
-        image = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
-        if image is None:
-            return jsonify({'error': 'Failed to decode image from URL'}), 400
 
-        module = get_waldo_module()
-        if confidence_threshold:
-            original_threshold = module.detector.confidence_threshold
-            module.detector.confidence_threshold = float(confidence_threshold)
-        result = module.process_frame(
-            image, {'source': image_url, 'timestamp': time.time(),
-                    'classes': classes})
-        if confidence_threshold:
-            module.detector.confidence_threshold = original_threshold
+def _video_job(job_id: str):
+    with _VIDEO_JOB_LOCK:
+        job = _VIDEO_JOBS.get(job_id)
+    if job is None:
+        return None
+    return job
 
-        detections = result['detections']
-        if classes:
-            detections = [d for d in detections
-                          if d.get('class_name') in classes]
-
-        return jsonify({
-            'image_id': f"img_{int(time.time() * 1000)}",
-            'detections': _detections_to_proxy_shape(detections, max_detections),
-            'processing_time_ms': result['processing_time'] * 1000.0,
-            'model_version': getattr(module, 'model_name', None)
-                             or module.config.get('model_name', 'waldo'),
-        })
-    except Exception as e:
-        logger.error(f"Error in /detect/url: {str(e)}")
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/detection/video', methods=['POST'])
 def process_video():
-    """Process a video file for object detection and tracking."""
+    """Start a private, opt-in asynchronous video job with isolated storage."""
+    if not WALDO_ENABLE_ASYNC_VIDEO:
+        return jsonify({"error": "asynchronous video processing is disabled"}), 404
+    file = request.files.get("video")
+    if file is None or not file.filename:
+        return jsonify({"error": "video is required"}), 400
     try:
-        # Check if video is provided
-        if 'video' not in request.files:
-            return jsonify({'error': 'No video provided'}), 400
-        
-        file = request.files['video']
-        if file.filename == '':
-            return jsonify({'error': 'No video selected'}), 400
-        
-        # Get parameters
-        confidence_threshold = request.form.get('confidence_threshold', None)
-        if confidence_threshold:
-            confidence_threshold = float(confidence_threshold)
-        
-        classes = request.form.get('classes', None)
-        if classes:
-            classes = json.loads(classes)
-        
-        track_objects = request.form.get('track_objects', 'true').lower() == 'true'
-        sample_rate = int(request.form.get('sample_rate', '1'))
-        
-        # Save video temporarily
+        confidence_threshold = _validated_confidence(request.form.get("confidence_threshold"))
+        sample_rate = int(request.form.get("sample_rate", "1"))
+        if not 1 <= sample_rate <= 60:
+            raise ValueError("sample_rate must be between 1 and 60")
         filename = secure_filename(file.filename)
-        temp_path = os.path.join('/tmp', filename)
-        file.save(temp_path)
-        
-        # Generate job ID
-        job_id = f"job_{int(time.time())}"
-        
-        # Start processing in a background thread
-        import threading
+        VIDEO_JOB_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+        job_id = f"job_{uuid.uuid4().hex}"
+        job_dir = Path(tempfile.mkdtemp(prefix=f"{job_id}-", dir=str(VIDEO_JOB_ROOT)))
+        input_path = job_dir / "input"
+        file.save(input_path)
+        job = {"state": "processing", "directory": job_dir, "input": input_path, "created_at": time.time()}
+        with _VIDEO_JOB_LOCK:
+            _VIDEO_JOBS[job_id] = job
+
         def process_video_task():
             try:
-                # Process video
-                metadata = {
-                    'source': filename,
-                    'job_id': job_id
-                }
-                
-                # Override confidence threshold if provided
                 module = get_waldo_module()
-                if confidence_threshold:
+                with _DETECTOR_LOCK:
                     original_threshold = module.detector.confidence_threshold
-                    module.detector.confidence_threshold = confidence_threshold
-                
-                # Process video
-                result = module.process_video(temp_path, metadata)
-                
-                # Restore original threshold
-                if confidence_threshold:
-                    module.detector.confidence_threshold = original_threshold
-                
-                # Store results
-                with open(f"/tmp/{job_id}_results.json", 'w') as f:
-                    json.dump(result, f)
-                
-                # Clean up
-                os.remove(temp_path)
-                
-                logger.info(f"Video processing completed for job {job_id}")
-            
-            except Exception as e:
-                logger.error(f"Error processing video: {str(e)}")
-                with open(f"/tmp/{job_id}_error.txt", 'w') as f:
-                    f.write(str(e))
-        
-        # Start processing thread
-        thread = threading.Thread(target=process_video_task)
-        thread.daemon = True
-        thread.start()
-        
-        # Return job ID
-        return jsonify({
-            'job_id': job_id,
-            'status': 'processing',
-            'estimated_completion_time': time.time() + 300  # Estimate 5 minutes
-        })
-    
-    except Exception as e:
-        logger.error(f"Error starting video processing: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+                    try:
+                        if confidence_threshold is not None:
+                            module.detector.confidence_threshold = confidence_threshold
+                        result = module.process_video(str(input_path), {"source": filename, "job_id": job_id, "sample_rate": sample_rate})
+                    finally:
+                        module.detector.confidence_threshold = original_threshold
+                results_path = job_dir / "results.json"
+                results_path.write_text(json.dumps(result), encoding="utf-8")
+                job.update({"state": "completed", "result": results_path, "summary": result, "completed_at": time.time()})
+            except Exception as exc:
+                logger.exception("WALDO video job failed")
+                job.update({"state": "failed", "error": "video processing failed", "completed_at": time.time()})
+            finally:
+                input_path.unlink(missing_ok=True)
+
+        threading.Thread(target=process_video_task, daemon=True, name=job_id).start()
+        return jsonify({"job_id": job_id, "status": "processing"}), 202
+    except (OSError, ValueError):
+        return jsonify({"error": "invalid video request"}), 400
+
 
 @app.route('/api/detection/video/<job_id>', methods=['GET'])
 def get_video_status(job_id):
-    """Check the status of a video processing job."""
-    try:
-        # Check if results file exists
-        results_path = f"/tmp/{job_id}_results.json"
-        error_path = f"/tmp/{job_id}_error.txt"
-        
-        if os.path.exists(results_path):
-            # Job completed successfully
-            with open(results_path, 'r') as f:
-                result_summary = json.load(f)
-            
-            return jsonify({
-                'job_id': job_id,
-                'status': 'completed',
-                'progress': 100,
-                'frames_processed': result_summary.get('frames_processed', 0),
-                'total_frames': result_summary.get('frames_processed', 0),
-                'processing_time': result_summary.get('processing_time', 0),
-                'result_url': f"/api/detection/video/{job_id}/results"
-            })
-        
-        elif os.path.exists(error_path):
-            # Job failed
-            with open(error_path, 'r') as f:
-                error_message = f.read()
-            
-            return jsonify({
-                'job_id': job_id,
-                'status': 'failed',
-                'error': error_message
-            })
-        
-        else:
-            # Job still processing or not found
-            import psutil
-            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                if 'python' in proc.info['name'] and job_id in ' '.join(proc.info.get('cmdline', [])):
-                    # Job is still processing
-                    return jsonify({
-                        'job_id': job_id,
-                        'status': 'processing',
-                        'progress': 50  # Estimate 50% complete
-                    })
-            
-            # Job not found
-            return jsonify({'error': f"Job {job_id} not found"}), 404
-    
-    except Exception as e:
-        logger.error(f"Error checking video status: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    """Read state only from a server-created random job identifier."""
+    job = _video_job(job_id)
+    if job is None:
+        return jsonify({"error": "job not found"}), 404
+    if job["state"] == "completed":
+        summary = job.get("summary", {})
+        return jsonify({"job_id": job_id, "status": "completed", "progress": 100,
+                        "frames_processed": summary.get("frames_processed", 0),
+                        "processing_time": summary.get("processing_time", 0),
+                        "result_url": f"/api/detection/video/{job_id}/results"})
+    if job["state"] == "failed":
+        return jsonify({"job_id": job_id, "status": "failed", "error": job["error"]}), 500
+    return jsonify({"job_id": job_id, "status": "processing", "progress": 0})
+
 
 @app.route('/api/detection/video/<job_id>/results', methods=['GET'])
 def get_video_results(job_id):
-    """Get the results of a completed video processing job."""
-    try:
-        # Check if results file exists
-        results_path = f"/tmp/{job_id}_results.json"
-        
-        if os.path.exists(results_path):
-            # Return results file
-            return send_file(results_path, mimetype='application/json')
-        else:
-            # Job not completed or not found
-            return jsonify({'error': f"Results for job {job_id} not found"}), 404
-    
-    except Exception as e:
-        logger.error(f"Error getting video results: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+    """Return a result only from a completed, in-memory-tracked job."""
+    job = _video_job(job_id)
+    if job is None or job.get("state") != "completed" or not job.get("result"):
+        return jsonify({"error": "completed result not found"}), 404
+    return send_file(job["result"], mimetype="application/json", conditional=True)
 
 @app.route('/api/data/detections', methods=['GET'])
 def get_detections():

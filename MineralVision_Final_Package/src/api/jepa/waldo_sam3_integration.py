@@ -329,6 +329,11 @@ class WALDOJEPAIntegration:
         import numpy as np
 
         service_url = os.environ["WALDO_SERVICE_URL"].rstrip("/")
+        service_token = os.environ.get("WALDO_API_TOKEN", "")
+        if not service_token:
+            raise WaldoIntegrationUnavailable(
+                "WALDO_API_TOKEN is required when WALDO_SERVICE_URL is configured; refusing unauthenticated inference"
+            )
 
         try:
             import httpx
@@ -346,7 +351,12 @@ class WALDOJEPAIntegration:
         }
 
         try:
-            response = httpx.post(f"{service_url}/detect", json=payload, timeout=60.0)
+            response = httpx.post(
+                f"{service_url}/detect",
+                json=payload,
+                headers={"X-Waldo-Service-Token": service_token},
+                timeout=60.0,
+            )
             response.raise_for_status()
             body = response.json()
         except Exception as e:

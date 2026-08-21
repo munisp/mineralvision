@@ -15,7 +15,8 @@ import uuid
 from sqlalchemy.orm import Session
 
 from ..database import get_db, UserModel
-from ..auth_middleware import hash_password, require_role, TokenPayload
+from ..auth_middleware import hash_password, require_auth, require_role, TokenPayload
+from ..authz import is_admin
 
 # Import RBAC module
 from ..auth.rbac import (
@@ -115,8 +116,14 @@ async def list_users(
 
 
 @router.get("/{user_id}", response_model=UserResponse)
-async def get_user(user_id: str, db: Session = Depends(get_db)):
-    """Get a specific user by ID."""
+async def get_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    requester: TokenPayload = Depends(require_auth)
+):
+    """Get only the caller's own profile unless the caller is an administrator."""
+    if requester.user_id != user_id and not is_admin(requester):
+        raise HTTPException(status_code=403, detail="Access denied")
     user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")
@@ -246,8 +253,14 @@ async def update_user_roles(
 
 
 @router.get("/{user_id}/permissions")
-async def get_user_permissions(user_id: str, db: Session = Depends(get_db)):
-    """Get all permissions for a user."""
+async def get_user_permissions(
+    user_id: str,
+    db: Session = Depends(get_db),
+    requester: TokenPayload = Depends(require_auth)
+):
+    """Get only the caller's own permissions unless the caller is an administrator."""
+    if requester.user_id != user_id and not is_admin(requester):
+        raise HTTPException(status_code=403, detail="Access denied")
     db_user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if not db_user:
         raise HTTPException(status_code=404, detail=f"User {user_id} not found")

@@ -8,6 +8,7 @@ import logging
 import os
 from typing import Any
 from urllib.error import URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,12 @@ class OPAMiddleware:
             raise OPAConfigurationError("OPA_ENABLED=true is required in production")
         if self.enabled and not self.url:
             raise OPAConfigurationError("OPA_URL is required when OPA_ENABLED=true")
+        if self.enabled:
+            parsed = urlparse(self.url)
+            if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+                raise OPAConfigurationError("OPA_URL must be a credential-free HTTP(S) URL")
+            if environment == "production" and parsed.hostname not in {"opa", "localhost", "127.0.0.1", "::1"}:
+                raise OPAConfigurationError("production OPA_URL must target the private OPA service")
 
     @staticmethod
     def _protected(path: str) -> bool:
