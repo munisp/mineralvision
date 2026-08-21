@@ -27,7 +27,7 @@ dependencies = [
     "sqlalchemy==2.0.51",
     "alembic==1.19.1",
     "psycopg2-binary==2.9.12",
-    "geoalchemy2==0.18.1",
+    "geoalchemy2==0.20.0",
     "PyJWT==2.13.0",
     "bcrypt==5.0.0",
     "numpy==2.5.1",
