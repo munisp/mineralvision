@@ -43,6 +43,21 @@ def db_session():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
     session = Session()
+    # This function-scoped fixture deliberately uses a stable project ID so the
+    # route assertions are readable. Remove only that prior fixture graph first
+    # so repeated tests and retries cannot collide in the shared CI database.
+    prior_holes = session.query(DrillholeModel).filter(
+        DrillholeModel.project_id == PROJECT_ID
+    ).all()
+    for prior_hole in prior_holes:
+        session.query(SampleModel).filter(
+            SampleModel.drillhole_id == prior_hole.id
+        ).delete(synchronize_session=False)
+        session.delete(prior_hole)
+    session.query(ProjectModel).filter(ProjectModel.id == PROJECT_ID).delete(
+        synchronize_session=False
+    )
+    session.commit()
     session.add(ProjectModel(id=PROJECT_ID, name="Yilgarn Gold", status="active"))
     hole_rows = {}
     for hid, x, y, z, td in HOLES:

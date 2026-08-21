@@ -1,11 +1,12 @@
 """Tests for prospectivity_copilot — deterministic NL parser + DB execution."""
 
 import os
+import re
 import sys
 import uuid
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..',
@@ -192,7 +193,15 @@ def test_explanation_is_plain_language():
 
 @pytest.fixture()
 def session():
-    engine = create_engine("sqlite:///:memory:")
+    """Use an isolated PostgreSQL schema for JSONB-aware prospectivity queries."""
+    database_url = os.environ.get("MV_TEST_DATABASE_URL") or os.environ.get("DATABASE_URL", "")
+    if not database_url.startswith(("postgres://", "postgresql://", "postgresql+")):
+        raise RuntimeError("MV_TEST_DATABASE_URL/DATABASE_URL must be an isolated PostgreSQL URL")
+    schema = f"prospectivity_{uuid.uuid4().hex}"
+    admin_engine = create_engine(database_url)
+    with admin_engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    engine = admin_engine.execution_options(schema_translate_map={None: schema})
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine)
     s = session_factory()
@@ -237,8 +246,14 @@ def session():
                     assay_data={"Cu": 8500.0}),
     ])
     s.commit()
-    yield s
-    s.close()
+    try:
+        yield s
+    finally:
+        s.close()
+        engine.dispose()
+        with admin_engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        admin_engine.dispose()
 
 
 def test_execute_list_gold_projects(session):

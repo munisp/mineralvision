@@ -7,15 +7,16 @@ journey manifest endpoint fix. No mocks of the platform auth path — tokens are
 captured via an injected email backend only.
 """
 
+import os
 import re
+import uuid
 from datetime import datetime, timedelta
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from api.database import Base as PlatformBase
 from api.database import UserModel
@@ -49,13 +50,28 @@ class CapturingEmailBackend:
 
 @pytest.fixture()
 def engine():
-    eng = create_engine(
-        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    )
+    """Run onboarding integration against a disposable PostgreSQL schema.
+
+    Platform metadata includes PostgreSQL JSONB columns, so SQLite is not an
+    acceptable stand-in after the production database migration.
+    """
+    database_url = os.environ.get("MV_TEST_DATABASE_URL") or os.environ.get("DATABASE_URL", "")
+    if not database_url.startswith(("postgres://", "postgresql://", "postgresql+")):
+        raise RuntimeError("MV_TEST_DATABASE_URL/DATABASE_URL must be an isolated PostgreSQL URL")
+    schema = f"onboarding_{uuid.uuid4().hex}"
+    admin_engine = create_engine(database_url)
+    with admin_engine.begin() as connection:
+        connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    eng = admin_engine.execution_options(schema_translate_map={None: schema})
     OnboardingBase.metadata.create_all(eng)
     PlatformBase.metadata.create_all(eng)
-    yield eng
-    eng.dispose()
+    try:
+        yield eng
+    finally:
+        eng.dispose()
+        with admin_engine.begin() as connection:
+            connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+        admin_engine.dispose()
 
 
 @pytest.fixture()
@@ -344,7 +360,16 @@ class TestJourneyManifest:
                     break
         assert step is not None, "step-001-2 not found in journey manifests"
         assert step.endpoint != "/api/users/invite"
-        route_paths = {r.path for r in onboarding_router.routes}
+        included = next(
+            route for route in onboarding_router.routes
+            if hasattr(route, "original_router") and hasattr(route, "include_context")
+        )
+        prefix = included.include_context.prefix
+        route_paths = {
+            f"{prefix}{route.path}"
+            for route in included.original_router.routes
+            if hasattr(route, "path")
+        }
         assert step.endpoint in route_paths, (
             f"journey endpoint {step.endpoint} does not match any onboarding route: "
             f"{sorted(route_paths)}"

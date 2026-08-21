@@ -20,10 +20,19 @@ uv lock --locked
 uv sync --locked --all-extras --dev
 
 pushd MineralVision_Final_Package >/dev/null
-alembic upgrade head
+uv run alembic upgrade head
 popd >/dev/null
 
-python3 scripts/verify.py
-python3 scripts/verify_security_baseline.py
-python3 scripts/verify_operations_baseline.py
-pytest -q --disable-warnings --maxfail=1
+uv run python scripts/verify.py
+uv run python scripts/verify_security_baseline.py
+uv run python scripts/verify_operations_baseline.py
+# Whole-repository coverage is a regression gate, not a correctness claim.
+# Raise this only after the locked suite is green at a higher measured level.
+COVERAGE_MINIMUM="${COVERAGE_MINIMUM:-35}"
+uv run pytest -q --disable-warnings --maxfail=1 \
+  --cov=MineralVision_Final_Package/src \
+  --cov=MineralVision_Enhanced \
+  --cov=MineralVision_WALDO_Production_Package \
+  --cov-report=term-missing \
+  --cov-report=xml:coverage.xml \
+  --cov-fail-under="$COVERAGE_MINIMUM"

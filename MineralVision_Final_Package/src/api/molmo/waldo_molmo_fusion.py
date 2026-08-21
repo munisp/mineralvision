@@ -226,9 +226,13 @@ class WALDOMolmoFusion:
                 sys.path.insert(0, _waldo_src)
             from waldo_integration.detection import WALDODetector
 
-            model_path = self.waldo_model_path or os.environ.get(
-                "WALDO_MODEL_PATH"
-            )
+            model_path = self.waldo_model_path or os.environ.get("WALDO_MODEL_PATH")
+            if not model_path:
+                logger.info("WALDO model artifact is not configured; using Molmo-only mode")
+                return
+            if not _os.path.isfile(model_path):
+                logger.warning("Configured WALDO model artifact does not exist; using Molmo-only mode")
+                return
             self._waldo_model = WALDODetector({
                 'model_path': model_path,
                 'architecture': 'yolo11',

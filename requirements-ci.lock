@@ -229,6 +229,8 @@ idna==3.19
     #   httpx
     #   requests
     #   yarl
+imageio==2.37.4
+    # via scikit-image
 importlib-metadata==9.0.0
     # via mlflow-skinny
 iniconfig==2.3.0
@@ -249,6 +251,8 @@ kiwisolver==1.5.0
     # via matplotlib
 laspy==2.7.0
     # via -r requirements.txt
+lazy-loader==0.5
+    # via scikit-image
 librt==0.15.0
     # via mypy
 license-expression==30.4.4
@@ -306,13 +310,16 @@ narwhals==2.25.0
     #   plotly
     #   scikit-learn
 networkx==3.6.1
-    # via torch
+    # via
+    #   scikit-image
+    #   torch
 numpy==2.5.1
     # via
     #   -r requirements.txt
     #   contourpy
     #   geopandas
     #   h5py
+    #   imageio
     #   laspy
     #   matplotlib
     #   mlflow
@@ -324,11 +331,13 @@ numpy==2.5.1
     #   pyvista
     #   rasterio
     #   rfdetr
+    #   scikit-image
     #   scikit-learn
     #   scipy
     #   shapely
     #   skops
     #   supervision
+    #   tifffile
     #   torchmetrics
     #   torchvision
     #   transformers
@@ -409,6 +418,7 @@ packaging==26.3
     #   geoalchemy2
     #   geopandas
     #   huggingface-hub
+    #   lazy-loader
     #   lightning-utilities
     #   matplotlib
     #   mlflow-skinny
@@ -421,6 +431,7 @@ packaging==26.3
     #   pyogrio
     #   pytest
     #   pytorch-lightning
+    #   scikit-image
     #   skops
     #   torchmetrics
     #   transformers
@@ -438,8 +449,10 @@ pathspec==1.1.1
 pillow==12.3.0
     # via
     #   -r requirements.txt
+    #   imageio
     #   matplotlib
     #   pyvista
+    #   scikit-image
     #   supervision
     #   torchvision
     #   ultralytics
@@ -621,6 +634,8 @@ s3transfer==0.19.2
     # via boto3
 safetensors==0.8.0
     # via transformers
+scikit-image==0.26.0
+    # via -r requirements-ml.txt
 scikit-learn==1.9.0
     # via
     #   -r requirements.txt
@@ -630,6 +645,7 @@ scipy==1.18.0
     # via
     #   -r requirements.txt
     #   mlflow
+    #   scikit-image
     #   scikit-learn
     #   skops
     #   supervision
@@ -682,6 +698,8 @@ tenacity==9.1.4
     # via -r requirements.txt
 threadpoolctl==3.6.0
     # via scikit-learn
+tifffile==2026.8.16
+    # via scikit-image
 tokenizers==0.22.2
     # via transformers
 tomli==2.4.1

@@ -127,7 +127,9 @@ def lakehouse_base_path() -> str:
     return os.getenv("GEODB_LAKEHOUSE_PATH", os.path.join(os.getcwd(), "lakehouse_data"))
 
 
-def sync_to_lakehouse(session, base_path: Optional[str] = None) -> Dict[str, Any]:
+def sync_to_lakehouse(
+    session, base_path: Optional[str] = None, project_id: Optional[str] = None
+) -> Dict[str, Any]:
     """Export drillholes + samples from the API DB to lakehouse parquet files.
 
     Uses the real MineralVision_Enhanced ParquetStorage class. Returns paths
@@ -137,7 +139,11 @@ def sync_to_lakehouse(session, base_path: Optional[str] = None) -> Dict[str, Any
     base = base_path or lakehouse_base_path()
     storage = ParquetStorage(ParquetConfig(base_path=base))
 
-    drillholes = session.query(DrillholeModel).all()
+    drillhole_query = session.query(DrillholeModel)
+    if project_id:
+        drillhole_query = drillhole_query.filter(DrillholeModel.project_id == project_id)
+    drillholes = drillhole_query.all()
+    drillhole_ids = {drillhole.id for drillhole in drillholes}
     dh_rows = [
         {
             "id": d.id,
@@ -154,7 +160,10 @@ def sync_to_lakehouse(session, base_path: Optional[str] = None) -> Dict[str, Any
         }
         for d in drillholes
     ]
-    samples = session.query(SampleModel).all()
+    sample_query = session.query(SampleModel)
+    if project_id:
+        sample_query = sample_query.filter(SampleModel.drillhole_id.in_(drillhole_ids))
+    samples = sample_query.all()
     sample_rows = [
         {
             "id": s.id,
@@ -173,6 +182,7 @@ def sync_to_lakehouse(session, base_path: Optional[str] = None) -> Dict[str, Any
     storage.write_parquet("samples/samples.parquet", sample_rows)
     return {
         "base_path": base,
+        "project_id": project_id,
         "drillholes": {
             "path": os.path.join(base, "drillholes", "drillholes.parquet"),
             "row_count": len(dh_rows),

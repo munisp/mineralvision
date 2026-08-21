@@ -54,6 +54,7 @@ class NearQuery(BaseModel):
 
 class SyncRequest(BaseModel):
     base_path: Optional[str] = None
+    project_id: Optional[str] = None
 
 
 class SedonaKnnRequest(BaseModel):
@@ -73,10 +74,15 @@ def _sample_xy(session, sample: SampleModel):
     return dh.collar_x, dh.collar_y, dh
 
 
-def _load_entities(session) -> List[IndexedEntity]:
-    """Load indexable entities (drillholes, samples, projects) from real rows."""
+def _load_entities(session, project_id: Optional[str] = None) -> List[IndexedEntity]:
+    """Load indexable entities from real rows, optionally within one project."""
     entities: List[IndexedEntity] = []
-    for d in session.query(DrillholeModel).all():
+    drillhole_query = session.query(DrillholeModel)
+    if project_id:
+        drillhole_query = drillhole_query.filter(DrillholeModel.project_id == project_id)
+    drillholes = drillhole_query.all()
+    drillhole_ids = {drillhole.id for drillhole in drillholes}
+    for d in drillholes:
         entities.append(
             IndexedEntity(
                 entity_id=d.id,
@@ -93,6 +99,8 @@ def _load_entities(session) -> List[IndexedEntity]:
             )
         )
     for s in session.query(SampleModel).all():
+        if project_id and s.drillhole_id not in drillhole_ids:
+            continue
         pos = _sample_xy(session, s)
         if pos is None:
             continue
@@ -200,6 +208,15 @@ def spatial_status():
         "indexed_entities": _INDEX.count,
         "index_bounds": _INDEX.bounds(),
     }
+    # Geometry metadata is persisted by the bridge in every supported dialect;
+    # expose its actual count consistently so operational status is comparable.
+    session = service.get_session()
+    try:
+        status["spatial_feature_rows"] = session.query(
+            service.SpatialFeatureModel
+        ).count()
+    finally:
+        session.close()
     if service.is_postgres():
         try:
             import geoalchemy2  # noqa: F401
@@ -211,15 +228,6 @@ def spatial_status():
                 "postgres configured but geoalchemy2 missing; geometry columns "
                 "unavailable until installed"
             )
-    else:
-        # report how many geometry metadata rows exist
-        session = service.get_session()
-        try:
-            status["spatial_feature_rows"] = session.query(
-                service.SpatialFeatureModel
-            ).count()
-        finally:
-            session.close()
     return status
 
 
@@ -227,17 +235,17 @@ def spatial_status():
 # Indexing + queries
 # --------------------------------------------------------------------------
 @router.post("/spatial/index/drillholes")
-def index_drillholes():
-    """Ingest drillhole collars (and samples positioned at collars) from the
-    API DB into the spatial index."""
+def index_drillholes(project_id: Optional[str] = None):
+    """Rebuild the spatial index, optionally for exactly one project."""
     session = service.get_session()
     try:
-        entities = _load_entities(session)
+        entities = _load_entities(session, project_id=project_id)
         _INDEX.rebuild(entities)
         _persist_spatial_features(session, entities)
     finally:
         session.close()
     return {
+        "project_id": project_id,
         "indexed": _INDEX.count,
         "by_type": {
             t: sum(1 for e in entities if e.entity_type == t)
@@ -286,7 +294,9 @@ def lakehouse_sync(req: SyncRequest = SyncRequest()):
     """Export drillholes/samples to the lakehouse parquet storage (real write)."""
     session = service.get_session()
     try:
-        result = service.sync_to_lakehouse(session, base_path=req.base_path)
+        result = service.sync_to_lakehouse(
+            session, base_path=req.base_path, project_id=req.project_id
+        )
     finally:
         session.close()
     _LAST_SYNC["result"] = result

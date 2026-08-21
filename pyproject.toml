@@ -27,6 +27,7 @@ dependencies = [
     "sqlalchemy==2.0.51",
     "alembic==1.19.1",
     "psycopg2-binary==2.9.12",
+    "geoalchemy2==0.18.1",
     "PyJWT==2.13.0",
     "bcrypt==5.0.0",
     "numpy==2.5.1",
@@ -71,6 +72,7 @@ ml = [
     "transformers==5.14.1",
     "rfdetr==1.9.1",
     "supervision==0.30.0",
+    "scikit-image==0.26.0",
 ]
 dev = [
     "pytest==9.1.1",

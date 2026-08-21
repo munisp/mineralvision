@@ -10,6 +10,7 @@ pytorch-lightning==2.6.5
 transformers==5.14.1
 rfdetr==1.9.1
 supervision==0.30.0
+scikit-image==0.26.0
 
 # Optional SAM segmentation backends (api/vision/sam3 — SAM3-ready
 # interface; current loadable backend is ultralytics SAM/SAM2 checkpoint

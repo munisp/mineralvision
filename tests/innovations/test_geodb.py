@@ -15,6 +15,7 @@ import tempfile
 import uuid
 
 import pytest
+from sqlalchemy import or_
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(REPO_ROOT, "MineralVision_Final_Package", "src"))
@@ -77,18 +78,54 @@ COLLARS = [
 
 HOLE_IDS = {}
 SAMPLE_IDS = {}
+TEST_RUN_ID = uuid.uuid4().hex
+PROJECT_ID = {"value": None}
+
+
+def _remove_prior_geodb_fixture_data(session):
+    """Remove only records created by earlier interrupted runs of this fixture."""
+    prior_users = session.query(UserModel).filter(
+        or_(
+            UserModel.username == "geodb_tester",
+            UserModel.username.like("geodb_tester_%"),
+        )
+    ).all()
+    for prior_user in prior_users:
+        projects = session.query(ProjectModel).filter(
+            ProjectModel.owner_id == prior_user.id,
+            ProjectModel.name == "GeoDB Test Project",
+        ).all()
+        for project in projects:
+            drillholes = session.query(DrillholeModel).filter(
+                DrillholeModel.project_id == project.id
+            ).all()
+            for drillhole in drillholes:
+                session.query(SampleModel).filter(
+                    SampleModel.drillhole_id == drillhole.id
+                ).delete(synchronize_session=False)
+                session.delete(drillhole)
+            session.delete(project)
+        session.delete(prior_user)
+    session.commit()
 
 
 @pytest.fixture(scope="module", autouse=True)
 def seed_database():
+    # Other test modules may mutate DATABASE_URL during collection/execution.
+    # GeoDB is PostgreSQL-only, so reassert the isolated CI URL immediately
+    # before constructing its local auxiliary-table engine.
+    os.environ["DATABASE_URL"] = _TEST_DATABASE_URL
+    service._engine_cache.pop(_TEST_DATABASE_URL, None)
     engine = service.get_engine()
+    assert engine.dialect.name == "postgresql"
     Base.metadata.create_all(engine)
     session = service.get_session()
     try:
+        _remove_prior_geodb_fixture_data(session)
         user = UserModel(
             id=str(uuid.uuid4()),
-            username="geodb_tester",
-            email="geodb@test.example",
+            username=f"geodb_tester_{TEST_RUN_ID}",
+            email=f"geodb_{TEST_RUN_ID}@test.example",
             password_hash="x",
         )
         session.add(user)
@@ -97,6 +134,7 @@ def seed_database():
         )
         session.add(project)
         session.flush()
+        PROJECT_ID["value"] = project.id
         for hole_id, x, y in COLLARS:
             dh = DrillholeModel(
                 id=str(uuid.uuid4()),
@@ -151,7 +189,7 @@ def test_spatial_status():
 
 
 def test_index_drillholes():
-    resp = client.post("/innovations/geodb/spatial/index/drillholes")
+    resp = client.post(f"/innovations/geodb/spatial/index/drillholes?project_id={PROJECT_ID['value']}")
     assert resp.status_code == 200
     body = resp.json()
     # 4 drillholes + 8 samples = 12 indexed entities
@@ -170,7 +208,7 @@ def test_index_drillholes():
 
 
 def test_bbox_query_returns_real_ids():
-    client.post("/innovations/geodb/spatial/index/drillholes")
+    client.post(f"/innovations/geodb/spatial/index/drillholes?project_id={PROJECT_ID['value']}")
     resp = client.post(
         "/innovations/geodb/spatial/query/bbox",
         json={"min_x": 90.0, "min_y": 190.0, "max_x": 200.0, "max_y": 300.0},
@@ -195,7 +233,7 @@ def test_bbox_query_returns_real_ids():
 
 
 def test_bbox_query_entity_type_filter():
-    client.post("/innovations/geodb/spatial/index/drillholes")
+    client.post(f"/innovations/geodb/spatial/index/drillholes?project_id={PROJECT_ID['value']}")
     resp = client.post(
         "/innovations/geodb/spatial/query/bbox",
         json={
@@ -212,7 +250,7 @@ def test_bbox_query_entity_type_filter():
 
 
 def test_near_query_real_distances():
-    client.post("/innovations/geodb/spatial/index/drillholes")
+    client.post(f"/innovations/geodb/spatial/index/drillholes?project_id={PROJECT_ID['value']}")
     # query at exact collar of DH-001: nearest drillhole distance must be 0
     resp = client.post(
         "/innovations/geodb/spatial/query/near",
@@ -235,7 +273,7 @@ def test_near_query_real_distances():
 
 
 def test_near_query_max_distance():
-    client.post("/innovations/geodb/spatial/index/drillholes")
+    client.post(f"/innovations/geodb/spatial/index/drillholes?project_id={PROJECT_ID['value']}")
     resp = client.post(
         "/innovations/geodb/spatial/query/near",
         json={
@@ -254,7 +292,10 @@ def test_near_query_max_distance():
 def test_lakehouse_sync_writes_real_parquet():
     import pyarrow.parquet as pq
 
-    resp = client.post("/innovations/geodb/lakehouse/sync", json={})
+    resp = client.post(
+        "/innovations/geodb/lakehouse/sync",
+        json={"project_id": PROJECT_ID["value"]},
+    )
     assert resp.status_code == 200
     body = resp.json()
     assert body["drillholes"]["row_count"] == 4
