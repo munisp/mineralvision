@@ -26,6 +26,7 @@ from enum import Enum, IntFlag
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import struct
 import hashlib
+import hmac
 
 logger = logging.getLogger(__name__)
 
@@ -846,7 +847,7 @@ class InMemoryTransferControlStore(TransferControlStore):
                 "previous_hash": prior_hash,
             }
             encoded = json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            event_hash = hashlib.sha256(self._audit_key + encoded).hexdigest()
+            event_hash = hmac.new(self._audit_key, encoded, hashlib.sha256).hexdigest()
             self._hashes[intent.idempotency_key] = event_hash
             return event_hash
 
@@ -1093,7 +1094,7 @@ class PostgresTransferControlStore(TransferControlStore):
                 "key_version": self.key_version,
             }
             encoded = json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            event_hash = hashlib.sha256(self.audit_key + encoded).hexdigest()
+            event_hash = hmac.new(self.audit_key, encoded, hashlib.sha256).hexdigest()
             cursor.execute(
                 """
                 INSERT INTO financial_transfer_audit_events
