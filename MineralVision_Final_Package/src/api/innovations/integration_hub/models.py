@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, JSON, Boolean, UniqueConstraint
 
 from .db import Base
 
@@ -97,3 +97,49 @@ class WritebackProposalModel(Base):
     review_reason = Column(String(2048), nullable=False, default="")
     created_at = Column(DateTime, nullable=False, default=_utcnow)
     approved_at = Column(DateTime, nullable=True)
+
+
+class AuditStreamModel(Base):
+    """One tenant-bound append-only audit stream and its latest trusted anchor."""
+
+    __tablename__ = "hub_audit_streams"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    stream_id = Column(String(128), nullable=False)
+    last_sequence = Column(Integer, nullable=False, default=0)
+    last_event_hash = Column(String(64), nullable=False, default="")
+    active_key_id = Column(String(128), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utcnow, onupdate=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "stream_id", name="uq_hub_audit_stream_tenant_stream"),
+    )
+
+
+class SignedAuditEventModel(Base):
+    """Immutable signed audit event; updates/deletes are forbidden by service policy."""
+
+    __tablename__ = "hub_signed_audit_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String(40), nullable=False, unique=True, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    stream_id = Column(String(128), nullable=False, index=True)
+    sequence = Column(Integer, nullable=False)
+    previous_hash = Column(String(64), nullable=False, default="")
+    event_hash = Column(String(64), nullable=False, index=True)
+    key_id = Column(String(128), nullable=False)
+    signature_b64 = Column(String(256), nullable=False)
+    event_type = Column(String(128), nullable=False)
+    actor_id = Column(String(128), nullable=False)
+    payload = Column(JSON, nullable=False, default=dict)
+    occurred_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "stream_id", "sequence", name="uq_hub_signed_event_stream_sequence"
+        ),
+    )
