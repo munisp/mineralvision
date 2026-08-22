@@ -165,7 +165,9 @@ class WebhookRegistry:
 # API keys
 # ---------------------------------------------------------------------------
 
-def create_api_key(db: Session, name: str, scopes: List[str]) -> Dict[str, Any]:
+def create_api_key(
+    db: Session, name: str, scopes: List[str], tenant_id: str = ""
+) -> Dict[str, Any]:
     """Create a scoped key. The plaintext key is returned ONCE; only a
     bcrypt hash of the full key is persisted."""
     if not scopes:
@@ -178,12 +180,16 @@ def create_api_key(db: Session, name: str, scopes: List[str]) -> Dict[str, Any]:
     full_key = f"mvk_{key_id}.{secret}"
     record = ApiKeyModel(
         key_id=key_id, key_hash=bcrypt.hashpw(full_key.encode(), bcrypt.gensalt()).decode(),
-        name=name, scopes=sorted(set(scopes)), active=True, created_at=_utcnow(),
+        name=name, tenant_id=tenant_id.strip(), scopes=sorted(set(scopes)), active=True,
+        created_at=_utcnow(),
     )
     db.add(record)
     db.commit()
     db.refresh(record)
-    return {"key": full_key, "key_id": key_id, "name": name, "scopes": record.scopes}
+    return {
+        "key": full_key, "key_id": key_id, "name": name,
+        "tenant_id": record.tenant_id, "scopes": record.scopes,
+    }
 
 
 def authenticate_key(db: Session, presented_key: str) -> Optional[ApiKeyModel]:
@@ -260,6 +266,7 @@ def delivery_to_dict(d: DeliveryModel) -> Dict[str, Any]:
 
 def api_key_to_dict(k: ApiKeyModel) -> Dict[str, Any]:
     return {
-        "id": k.id, "key_id": k.key_id, "name": k.name, "scopes": k.scopes,
+        "id": k.id, "key_id": k.key_id, "name": k.name,
+        "tenant_id": k.tenant_id, "scopes": k.scopes,
         "active": k.active, "created_at": k.created_at.isoformat(),
     }

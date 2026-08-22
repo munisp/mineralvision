@@ -51,6 +51,49 @@ class ApiKeyModel(Base):
     key_id = Column(String(32), nullable=False, unique=True, index=True)  # public lookup id
     key_hash = Column(String(128), nullable=False)  # bcrypt of full key
     name = Column(String(128), nullable=False)
+    tenant_id = Column(String(128), nullable=False, default="", index=True)
     scopes = Column(JSON, nullable=False, default=list)  # e.g. ["read", "write"]
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=_utcnow)
+
+
+class EvidenceRecordModel(Base):
+    """Tenant-bound source evidence with canonical lineage and model provenance."""
+
+    __tablename__ = "hub_evidence_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    evidence_id = Column(String(40), nullable=False, unique=True, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    source_system = Column(String(64), nullable=False)
+    source_ref = Column(String(1024), nullable=False)
+    source_version = Column(String(256), nullable=False)
+    observed_at = Column(DateTime, nullable=False)
+    ingested_at = Column(DateTime, nullable=False, default=_utcnow)
+    geometry = Column(JSON, nullable=False, default=dict)
+    payload = Column(JSON, nullable=False, default=dict)
+    model_run = Column(JSON, nullable=False, default=dict)
+    lineage_hash = Column(String(64), nullable=False, index=True)
+
+
+class WritebackProposalModel(Base):
+    """A reviewed candidate update; no external write happens in this table."""
+
+    __tablename__ = "hub_writeback_proposals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    proposal_id = Column(String(40), nullable=False, unique=True, index=True)
+    tenant_id = Column(String(128), nullable=False, index=True)
+    evidence_id = Column(String(40), nullable=False, index=True)
+    target_system = Column(String(64), nullable=False)
+    target_ref = Column(String(1024), nullable=False)
+    state = Column(String(32), nullable=False, default="staged", index=True)
+    request_hash = Column(String(64), nullable=False, index=True)
+    candidate_payload = Column(JSON, nullable=False, default=dict)
+    dry_run = Column(JSON, nullable=False, default=dict)
+    submitted_by = Column(String(128), nullable=False)
+    reviewer_id = Column(String(128), nullable=True)
+    mfa_verified = Column(Boolean, nullable=False, default=False)
+    review_reason = Column(String(2048), nullable=False, default="")
+    created_at = Column(DateTime, nullable=False, default=_utcnow)
+    approved_at = Column(DateTime, nullable=True)
