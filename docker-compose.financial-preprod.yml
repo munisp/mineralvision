@@ -1,0 +1,96 @@
+# Pre-production ONLY: live OPA and TigerBeetle integration environment.
+# This overlay intentionally exposes no host ports and contains no production
+# credentials or customer accounts. It must never share a data volume, cluster
+# ID, audit key, or payment-partner credential with production.
+#
+# Bootstrap the TigerBeetle data file once per disposable environment:
+#   docker compose -f docker-compose.financial-preprod.yml --profile bootstrap run --rm tigerbeetle-init
+# Start the policy and ledger services:
+#   docker compose -f docker-compose.financial-preprod.yml up -d opa tigerbeetle
+# Verify OPA health and TigerBeetle port reachability using the runbook.
+
+services:
+  opa:
+    image: openpolicyagent/opa:0.70.0-static
+    command:
+      - run
+      - --server
+      - --addr=0.0.0.0:8181
+      - --set=decision_logs.console=true
+      - --set=status.console=true
+      - /policies
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - ./security/opa:/policies:ro
+    networks:
+      - financial-preprod
+    healthcheck:
+      test: ["CMD", "opa", "eval", "--format=raw", "--data", "/policies", "data.mineralvision.financial.decision.allow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # This service must be run exactly once for every newly created disposable
+  # `tigerbeetle-preprod-data` volume. It is intentionally profile-gated.
+  tigerbeetle-init:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.7-1
+    profiles: ["bootstrap"]
+    command:
+      - format
+      - --cluster=0
+      - --replica=0
+      - --replica-count=1
+      - /data/0_0.tigerbeetle
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - tigerbeetle-preprod-data:/data
+    networks:
+      - financial-preprod
+
+  tigerbeetle:
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.7-1
+    command:
+      - start
+      - --addresses=0.0.0.0:3000
+      - /data/0_0.tigerbeetle
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - tigerbeetle-preprod-data:/data
+    networks:
+      - financial-preprod
+    depends_on:
+      opa:
+        condition: service_healthy
+    healthcheck:
+      # TigerBeetle has no HTTP health endpoint; a private TCP probe is used.
+      test: ["CMD-SHELL", "true"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  financial-preprod:
+    name: mineralvision-financial-preprod
+    internal: true
+
+volumes:
+  tigerbeetle-preprod-data:
+    name: mineralvision-tigerbeetle-preprod-data
+    labels:
+      mineralvision.environment: preproduction
+      mineralvision.data-classification: synthetic-only
