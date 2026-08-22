@@ -1,0 +1,30 @@
+{
+  "offhost_bundle_path": "/tmp/tmpnye1kkvv.jsonl",
+  "result": "passed",
+  "steps": [
+    {
+      "event_id": "ae_03737f8dbd954b268f5783af1a5b1dab",
+      "step": "old_key_pre_compromise_accepted"
+    },
+    {
+      "result": "rejected_for_new_envelopes",
+      "step": "old_key_contained"
+    },
+    {
+      "new_key_id": "staging-new-rotated",
+      "old_anchor": "c74ee21f31a61ddf005a010401b077f51c18b096ba6e038ad06d7af18683e0fa",
+      "step": "stream_key_rotated"
+    },
+    {
+      "event_id": "ae_b70079e81e674b8a99f7e71033934558",
+      "step": "new_key_post_rotation_accepted"
+    },
+    {
+      "event_count": 3,
+      "last_hash": "d1e4d97b1cbce27af918012ef35ed35ddad4c059a85fd20c905bd082abc21387",
+      "step": "full_chain_verified"
+    }
+  ],
+  "stream_id": "connector:staging-drill",
+  "tenant_id": "staging-drill-1c1427eb31954e028b0b48f1ea0d5ab9"
+}
