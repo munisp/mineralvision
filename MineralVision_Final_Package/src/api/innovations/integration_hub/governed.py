@@ -20,7 +20,12 @@ from sqlalchemy.orm import Session
 from .models import EvidenceRecordModel, WritebackProposalModel
 
 
-SUPPORTED_SOURCE_SYSTEMS = {"seequent_evo", "arcgis_enterprise", "file_export"}
+SUPPORTED_SOURCE_SYSTEMS = {
+    "seequent_evo",
+    "arcgis_enterprise",
+    "file_export",
+    "huggingface_dataset",
+}
 SUPPORTED_WRITEBACK_TARGETS = {"arcgis_enterprise"}
 
 

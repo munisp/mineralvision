@@ -1,0 +1,18 @@
+{
+  "name": "octosense",
+  "slug": "octosense",
+  "version": "1.21.0",
+  "media_type": "multimodal",
+  "created_at": {"$date": "2026-08-20T19:05:03.888Z"},
+  "last_modified_at": {"$date": "2026-08-20T19:05:28.079Z"},
+  "sample_fields": [
+    {"name": "filepath"}, {"name": "duration_s"}, {"name": "message_count"},
+    {"name": "channel_count"}, {"name": "topics"}, {"name": "schemas"},
+    {"name": "session"}, {"name": "start_time"}, {"name": "split"},
+    {"name": "n_lidar_frames"}, {"name": "n_rgb_frames"}, {"name": "n_imu_samples"},
+    {"name": "n_gps_fixes"}, {"name": "n_gps_valid"}, {"name": "gps_quality"},
+    {"name": "rgb_cal_id"}, {"name": "imu_cal_id"}, {"name": "lidar_cal_id"},
+    {"name": "n_events_left"}, {"name": "n_events_right"}, {"name": "sensor_dropout"},
+    {"name": "platform"}, {"name": "bag_id"}
+  ]
+}
