@@ -1,0 +1,102 @@
+{
+  "benchmark": "MineralVision signed append-only audit chain",
+  "cases": [
+    {
+      "appended_events": 500,
+      "chain_verification": {
+        "event_count": 500,
+        "failure_count": 0,
+        "last_sequence": 500,
+        "valid": true
+      },
+      "errors": [],
+      "latency_ms": {
+        "max": 22.657,
+        "mean": 3.096,
+        "min": 2.872,
+        "p50": 3.016,
+        "p95": 3.306,
+        "p99": 3.553
+      },
+      "requested_events": 500,
+      "throughput_events_per_second": 306.592,
+      "wall_seconds": 1.630834,
+      "workers": 1
+    },
+    {
+      "appended_events": 500,
+      "chain_verification": {
+        "event_count": 500,
+        "failure_count": 0,
+        "last_sequence": 500,
+        "valid": true
+      },
+      "errors": [],
+      "latency_ms": {
+        "max": 76.379,
+        "mean": 18.37,
+        "min": 4.262,
+        "p50": 11.971,
+        "p95": 46.662,
+        "p99": 54.354
+      },
+      "requested_events": 500,
+      "throughput_events_per_second": 420.896,
+      "wall_seconds": 1.187942,
+      "workers": 8
+    },
+    {
+      "appended_events": 500,
+      "chain_verification": {
+        "event_count": 500,
+        "failure_count": 0,
+        "last_sequence": 500,
+        "valid": true
+      },
+      "errors": [],
+      "latency_ms": {
+        "max": 540.721,
+        "mean": 76.685,
+        "min": 4.677,
+        "p50": 11.812,
+        "p95": 418.995,
+        "p99": 498.34
+      },
+      "requested_events": 500,
+      "throughput_events_per_second": 383.477,
+      "wall_seconds": 1.303858,
+      "workers": 32
+    },
+    {
+      "appended_events": 500,
+      "chain_verification": {
+        "event_count": 500,
+        "failure_count": 0,
+        "last_sequence": 500,
+        "valid": true
+      },
+      "errors": [],
+      "latency_ms": {
+        "max": 1193.738,
+        "mean": 146.052,
+        "min": 7.097,
+        "p50": 17.884,
+        "p95": 816.582,
+        "p99": 1116.916
+      },
+      "requested_events": 500,
+      "throughput_events_per_second": 394.448,
+      "wall_seconds": 1.267593,
+      "workers": 64
+    }
+  ],
+  "database_dialect": "postgresql",
+  "events_per_case": 500,
+  "scope": "single tenant/single stream row-lock contention; in-process Ed25519 signing; no KMS/HSM or off-host exporter latency",
+  "worker_counts": [
+    1,
+    8,
+    32,
+    64
+  ]
+}
